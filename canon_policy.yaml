@@ -1,0 +1,12 @@
+# canon_policy.yaml
+# Politica de amortiguacion de conflictos para Canon.
+# Controla que namespaces disparan interrupcion obligatoria (interrupt)
+# y cuales se resuelven automaticamente (soft_lww / auto_latest).
+
+rules:
+  "db:*": "interrupt"          # Modificaciones de esquema, PKs y migraciones
+  "security:*": "interrupt"    # Tokens, almacenamiento de sesion, CORS, auth
+  "convention:*": "soft_lww"   # Estilos de codigo, linters, ramas de git
+  "dev_local:*": "auto_latest" # Puertos locales, flags temporales de dev
+
+defaultPolicy: "soft_lww"
