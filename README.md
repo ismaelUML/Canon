@@ -84,9 +84,10 @@ Para conectar Canon a Antigravity mediante MCP, agregá la siguiente entrada en 
       "command": "node",
       "args": [
         "--experimental-strip-types",
-        "C:\\Users\\Danie\\.gemini\\antigravity-ide\\scratch\\canon\\src\\adapters\\mcp\\server.ts"
+        "<path-to-canon>/src/adapters/mcp/server.ts"
       ]
     }
   }
 }
 ```
+> Reemplazá `<path-to-canon>` con la ruta absoluta donde clonaste el repositorio (por ejemplo, `C:\\Users\\<your-user>\\...` en Windows o `/home/<your-user>/...` en Linux/macOS).
