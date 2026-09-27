@@ -28,7 +28,12 @@ export function fold(
   policy: PolicyConfig = DEFAULT_POLICY_CONFIG
 ): Projection {
   const projection = createEmptyProjection();
-  for (const event of events) {
+  // Orden causal total: Git 3-way merge no garantiza el orden de las lineas en texto,
+  // pero el reloj logico garantiza que A->B se procesa siempre en orden causal deterministico.
+  const sorted = [...events].sort((a, b) => 
+    (a.logical_ts ?? 0) - (b.logical_ts ?? 0) || a.id.localeCompare(b.id)
+  );
+  for (const event of sorted) {
     applyEvent(projection, event, policy);
   }
   return projection;

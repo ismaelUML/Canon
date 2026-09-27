@@ -40,6 +40,7 @@ export class ResolveConflictUseCase {
     const event: ResolveConflictEvent = {
       id: eventId,
       entity_key: request.entity_key,
+      logical_ts: 0,
       resolves_event_ids: request.resolves_event_ids,
       winning_value: request.winning_value,
       authority: request.authority,

@@ -63,6 +63,7 @@ export class AssertFactUseCase {
     const event: AssertEvent = {
       id: eventId,
       entity_key: request.entity_key,
+      logical_ts: 0,
       slot_type: request.slot_type,
       value: request.value,
       authority: request.authority,

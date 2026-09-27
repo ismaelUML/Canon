@@ -3,4 +3,8 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+.canon/*.db
+.canon/*.db-wal
+.canon/*.db-shm
+.canon/*.lock
 .DS_Store

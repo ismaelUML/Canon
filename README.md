@@ -50,15 +50,19 @@ scratch/canon/
 1. **Supersesión Estructural por Cardinalidad:**
    - **Slots de valor único** (`SINGLE_VALUED`): `dep:tailwindcss:version`, `db:pk_format`. Una nueva aserción **es** una supersesión automática. Sin NLP.
    - **Slots acumulativos** (`ACCUMULATIVE`): `learned:gotchas:*`. Conviven como lista aditiva de quirks.
-2. **Jerarquía de Autoridad:**
+2. **Jerarquía de Autoridad y Reloj Lógico (Lamport Clock):**
    - `USER_EXPLICIT (100)` > `REPO_ORACLE (90)` > `CODE_VERIFIED (80)` > `INFERRED (40)`.
-   - Inferencias vagas jamás voltean decisiones explícitas del usuario.
-3. **Detección de Conflictos via Point Lookup:**
-   - La colisión se detecta en tiempo de inserción indexada sobre SQLite en <1ms.
-   - En namespaces críticos (`db:*`, `security:*`), la misma autoridad no pisa silenciosamente; dispara un estado `CONFLICT`.
-4. **Oráculo Mecánico del Repositorio:**
+   - Cada evento porta un `logical_ts`. El reductor ordena por causalidad lógica antes de plegar: **inmune a intercalaciones desordenadas de un merge de Git**.
+3. **Colaboración en Git y Almacenamiento Híbrido:**
+   - **Fuente de verdad:** `.canon/events.jsonl` (append-only de texto plano, versionado en Git, mergeable sin conflictos binarios).
+   - **Acelerador local:** `.canon/cache.db` (SQLite efímero en `.gitignore`, invalidado automáticamente por hash SHA-256 al detectar un `git pull`).
+   - **Mutex atómico de filesystem:** Bloquea escrituras concurrentes entre múltiples ventanas de Antigravity sobre el mismo repo.
+4. **Soporte Nativo para Monorepos (PathResolver):**
+   - Búsqueda ascendente desde el archivo activo (`context_path`) hacia el boundary marker más cercano (`package.json`, `go.mod`, etc.).
+   - **Techo duro en `.git/`:** La búsqueda jamás cruza la raíz del repositorio hacia carpetas personales del sistema.
+5. **Oráculo Mecánico del Repositorio:**
    - Audita automáticamente el disco (`package.json`) contra la memoria activa para auto-corregir dependencias desactualizadas.
-5. **Cero Dependencias Externas de NPM:**
+6. **Cero Dependencias Externas de NPM:**
    - Utiliza TypeScript nativo (`--experimental-strip-types`), `node:sqlite` nativo y `node:test` nativo de Node 24.
 
 ---

@@ -70,6 +70,7 @@ export class RepoOracle {
         const supersedeEvent: SupersedeEvent = {
           id: `oracle_${randomUUID()}`,
           entity_key: entityKey,
+          logical_ts: 0,
           supersedes_event_id: currentFact.source_event_id,
           new_value: realVersion,
           authority: Authority.REPO_ORACLE,

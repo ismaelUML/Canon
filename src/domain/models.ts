@@ -16,6 +16,7 @@ export type AuthorityLevel = number;
 export interface BaseEvent {
   id: string;
   entity_key: string;
+  logical_ts: number; // Reloj logico para orden total causal (inmune a merges desordenados de Git)
   authority: AuthorityLevel;
   source_session_id?: string;
   created_at: string;

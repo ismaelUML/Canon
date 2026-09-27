@@ -10,6 +10,7 @@ import type { EventStore } from '../../ports/event_store.ts';
 interface EventRow {
   id: string;
   entity_key: string;
+  logical_ts: number;
   event_type: 'ASSERT' | 'SUPERSEDE' | 'RESOLVE_CONFLICT';
   slot_type: 'SINGLE_VALUED' | 'ACCUMULATIVE' | null;
   value: string;
@@ -35,6 +36,7 @@ export class SQLiteEventStore implements EventStore {
       CREATE TABLE IF NOT EXISTS memory_events (
         id TEXT PRIMARY KEY,
         entity_key TEXT NOT NULL,
+        logical_ts INTEGER NOT NULL DEFAULT 0,
         event_type TEXT NOT NULL,
         slot_type TEXT,
         value TEXT NOT NULL,
@@ -45,6 +47,7 @@ export class SQLiteEventStore implements EventStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_events_key ON memory_events(entity_key);
+      CREATE INDEX IF NOT EXISTS idx_events_ts ON memory_events(logical_ts);
       CREATE INDEX IF NOT EXISTS idx_events_created ON memory_events(created_at);
     `);
   }
@@ -52,9 +55,9 @@ export class SQLiteEventStore implements EventStore {
   async append(event: MemoryEvent): Promise<void> {
     const stmt = this.db.prepare(`
       INSERT INTO memory_events (
-        id, entity_key, event_type, slot_type, value, authority,
+        id, entity_key, logical_ts, event_type, slot_type, value, authority,
         supersedes_event_id, resolves_event_ids, source_session_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const slotType = event.type === 'ASSERT' ? event.slot_type : null;
@@ -65,6 +68,7 @@ export class SQLiteEventStore implements EventStore {
     stmt.run(
       event.id,
       event.entity_key,
+      event.logical_ts ?? 0,
       event.type,
       slotType,
       value,
@@ -80,7 +84,7 @@ export class SQLiteEventStore implements EventStore {
     const stmt = this.db.prepare(`
       SELECT * FROM memory_events 
       WHERE entity_key = ? 
-      ORDER BY created_at ASC
+      ORDER BY logical_ts ASC, created_at ASC
     `);
     const rows = stmt.all(entityKey) as unknown as EventRow[];
     return rows.map((r) => this.mapRowToEvent(r));
@@ -89,7 +93,7 @@ export class SQLiteEventStore implements EventStore {
   async getAllEvents(): Promise<MemoryEvent[]> {
     const stmt = this.db.prepare(`
       SELECT * FROM memory_events 
-      ORDER BY created_at ASC
+      ORDER BY logical_ts ASC, created_at ASC
     `);
     const rows = stmt.all() as unknown as EventRow[];
     return rows.map((r) => this.mapRowToEvent(r));
@@ -103,6 +107,7 @@ export class SQLiteEventStore implements EventStore {
     const base = {
       id: row.id,
       entity_key: row.entity_key,
+      logical_ts: row.logical_ts ?? 0,
       authority: row.authority,
       source_session_id: row.source_session_id ?? undefined,
       created_at: row.created_at,

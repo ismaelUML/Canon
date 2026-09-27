@@ -4,7 +4,8 @@
 // Expone canon_assert_fact, canon_query_active, canon_resolve_conflict y canon_audit_repo.
 
 import { createInterface } from 'node:readline';
-import { SQLiteEventStore } from '../storage/sqlite_store.ts';
+import { resolveProjectRoot } from '../resolver/path_resolver.ts';
+import { HybridEventStore } from '../storage/hybrid_store.ts';
 import { AssertFactUseCase } from '../../use_cases/assert_fact.ts';
 import { QueryActiveStateUseCase } from '../../use_cases/query_active_state.ts';
 import { ResolveConflictUseCase } from '../../use_cases/resolve_conflict.ts';
@@ -15,10 +16,14 @@ import type { SlotCardinality } from '../../domain/models.ts';
 const TOOLS = [
   {
     name: 'canon_assert_fact',
-    description: 'Registra un hecho o regla en Canon con control de supersesion automatica o slots acumulativos.',
+    description: 'Registra un hecho o regla en Canon con control de supersesion automatica o slots acumulativos en el proyecto activo.',
     inputSchema: {
       type: 'object',
       properties: {
+        context_path: {
+          type: 'string',
+          description: 'Ruta del archivo o carpeta activa para resolver el proyecto o monorepo (busca hacia arriba con techo en .git)',
+        },
         entity_key: {
           type: 'string',
           description: 'Clave jerarquica (ej: dep:tailwindcss:version, db:pk_format, convention:git:branch_naming)',
@@ -37,20 +42,25 @@ const TOOLS = [
           description: 'Nivel de autoridad: 100 (USER_EXPLICIT), 80 (CODE_VERIFIED), 40 (INFERRED). Por defecto 100.',
         },
       },
-      required: ['entity_key', 'slot_type', 'value'],
+      required: ['context_path', 'entity_key', 'slot_type', 'value'],
     },
   },
   {
     name: 'canon_query_active',
-    description: 'Consulta los hechos y convenciones actualmente activos en Canon, omitiendo versiones obsoletas.',
+    description: 'Consulta los hechos y convenciones actualmente activos en Canon para el proyecto activo.',
     inputSchema: {
       type: 'object',
       properties: {
+        context_path: {
+          type: 'string',
+          description: 'Ruta del archivo o carpeta activa para resolver el proyecto o monorepo',
+        },
         anchor: {
           type: 'string',
           description: 'Filtro opcional por prefijo (ej: dep:, db:, security:)',
         },
       },
+      required: ['context_path'],
     },
   },
   {
@@ -87,16 +97,19 @@ const TOOLS = [
 ];
 
 export class MCPServer {
-  private store: SQLiteEventStore;
-  private assertCase: AssertFactUseCase;
-  private queryCase: QueryActiveStateUseCase;
-  private resolveCase: ResolveConflictUseCase;
+  private stores: Map<string, HybridEventStore> = new Map();
 
-  constructor(dbPath: string = 'canon.db') {
-    this.store = new SQLiteEventStore(dbPath);
-    this.assertCase = new AssertFactUseCase(this.store);
-    this.queryCase = new QueryActiveStateUseCase(this.store);
-    this.resolveCase = new ResolveConflictUseCase(this.store);
+  constructor() {}
+
+  getStore(contextPath?: string): { store: HybridEventStore; rootDir: string } {
+    const targetPath = contextPath ?? process.cwd();
+    const resolved = resolveProjectRoot(targetPath);
+    let store = this.stores.get(resolved.canonDir);
+    if (!store) {
+      store = new HybridEventStore(resolved.canonDir);
+      this.stores.set(resolved.canonDir, store);
+    }
+    return { store, rootDir: resolved.rootDir };
   }
 
   startStdio(): void {
@@ -175,8 +188,13 @@ export class MCPServer {
   }
 
   private async dispatchTool(name: string, args: any): Promise<string> {
+    const { store, rootDir } = this.getStore(args.context_path);
+    const assertCase = new AssertFactUseCase(store);
+    const queryCase = new QueryActiveStateUseCase(store);
+    const resolveCase = new ResolveConflictUseCase(store);
+
     if (name === 'canon_assert_fact') {
-      const res = await this.assertCase.execute({
+      const res = await assertCase.execute({
         entity_key: args.entity_key,
         slot_type: args.slot_type as SlotCardinality,
         value: args.value,
@@ -185,29 +203,28 @@ export class MCPServer {
       if (!res.ok) {
         return `❌ Error al registrar asercion: ${res.error}`;
       }
-      return `✅ Asercion registrada con id ${res.event_id}. Proyeccion actualizada correctamente.`;
+      return `✅ Asercion registrada con id ${res.event_id} en ${rootDir}. Proyeccion actualizada.`;
     }
 
     if (name === 'canon_query_active') {
-      const res = await this.queryCase.execute({ anchor: args.anchor });
-      return res.formattedContext;
+      const res = await queryCase.execute({ anchor: args.anchor });
+      return `[Proyecto: ${rootDir}]\n` + res.formattedContext;
     }
 
     if (name === 'canon_resolve_conflict') {
-      const res = await this.resolveCase.execute({
+      const res = await resolveCase.execute({
         entity_key: args.entity_key,
         resolves_event_ids: args.resolves_event_ids ?? [],
         winning_value: args.winning_value,
         authority: args.authority ?? Authority.USER_EXPLICIT,
       });
-      return `✅ Conflicto en '${args.entity_key}' resuelto. Hecho ganador: '${args.winning_value}'.`;
+      return `✅ Conflicto en '${args.entity_key}' resuelto en ${rootDir}. Hecho ganador: '${args.winning_value}'.`;
     }
 
     if (name === 'canon_audit_repo') {
-      const root = args.project_root ?? process.cwd();
-      const oracle = new RepoOracle(this.store, root);
+      const oracle = new RepoOracle(store, rootDir);
       const audit = await oracle.auditPackageJson();
-      return `🔍 Auditoria completada en ${root}.\n- Claves inspeccionadas: ${audit.checked_keys}\n- Desactualizaciones corregidas: ${audit.mismatches_found}\n- Eventos de supersesion emitidos: ${audit.superseded_events.length}`;
+      return `🔍 Auditoria completada en ${rootDir}.\n- Claves inspeccionadas: ${audit.checked_keys}\n- Desactualizaciones corregidas: ${audit.mismatches_found}\n- Eventos de supersesion emitidos: ${audit.superseded_events.length}`;
     }
 
     return `Herramienta desconocida: ${name}`;
@@ -216,6 +233,6 @@ export class MCPServer {
 
 // Ejecucion directa por CLI / stdio
 if (process.argv[1] && process.argv[1].endsWith('server.ts')) {
-  const server = new MCPServer('canon.db');
+  const server = new MCPServer();
   server.startStdio();
 }
