@@ -1,0 +1,31 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    name: Test & Staleness Benchmark
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [24.x]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: 🛡️ Run Test #1: Staleness Benchmark (Obsolescence & Conflict Detection)
+        run: npm run test:staleness
+
+      - name: 🧪 Run Test #2: Unit & Integration Tests (SQLite, Security, Oracle, MCP)
+        run: npm run test:unit
