@@ -2,6 +2,7 @@
 // Caso de uso: el agente o el usuario afirman un hecho en Canon.
 // Aplica filtro defensivo de credenciales y limite anti-loop por turno.
 
+import { randomUUID } from 'node:crypto';
 import type { EventStore } from '../ports/event_store.ts';
 import type { SlotCardinality, AuthorityLevel, AssertEvent, Projection } from '../domain/models.ts';
 import { validateAssertionSecurity } from '../domain/security.ts';
@@ -57,8 +58,8 @@ export class AssertFactUseCase {
       };
     }
 
-    // 3. Crear el evento inmutable
-    const eventId = `evt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    // 3. Crear el evento inmutable con ID criptograficamente seguro (RFC 4122)
+    const eventId = `evt_${randomUUID()}`;
     const event: AssertEvent = {
       id: eventId,
       entity_key: request.entity_key,

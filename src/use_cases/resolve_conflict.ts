@@ -2,6 +2,7 @@
 // Caso de uso: resuelve explicitamente un conflicto entre dos aserciones del mismo nivel.
 // Emite el evento inmutable RESOLVE_CONFLICT que entierra las versiones en disputa.
 
+import { randomUUID } from 'node:crypto';
 import type { EventStore } from '../ports/event_store.ts';
 import type { ResolveConflictEvent, Projection } from '../domain/models.ts';
 import { fold } from '../domain/fold.ts';
@@ -35,7 +36,7 @@ export class ResolveConflictUseCase {
   }
 
   async execute(request: ResolveConflictRequest): Promise<ResolveConflictResult> {
-    const eventId = `res_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const eventId = `res_${randomUUID()}`;
     const event: ResolveConflictEvent = {
       id: eventId,
       entity_key: request.entity_key,

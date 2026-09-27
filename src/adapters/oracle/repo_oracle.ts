@@ -7,6 +7,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { EventStore } from '../../ports/event_store.ts';
 import type { SupersedeEvent } from '../../domain/models.ts';
 import { Authority } from '../../domain/models.ts';
@@ -67,7 +68,7 @@ export class RepoOracle {
       if (currentFact.value !== realVersion) {
         mismatches++;
         const supersedeEvent: SupersedeEvent = {
-          id: `oracle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: `oracle_${randomUUID()}`,
           entity_key: entityKey,
           supersedes_event_id: currentFact.source_event_id,
           new_value: realVersion,
