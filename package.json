@@ -4,7 +4,7 @@
   "description": "Deterministic Truth-Maintenance Memory Engine for AI Coding Agents",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test tests/benchmark/test_staleness_ci.test.ts"
+    "test": "node --experimental-strip-types --test tests/benchmark/*.test.ts tests/unit/*.test.ts"
   },
   "keywords": [
     "antigravity",
