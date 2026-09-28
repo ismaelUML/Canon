@@ -19,6 +19,8 @@ import { DatabaseSync } from 'node:sqlite';
 import type { MemoryEvent, ConflictState } from '../../domain/models.ts';
 import type { EventStore } from '../../ports/event_store.ts';
 import { fold } from '../../domain/fold.ts';
+import { DEFAULT_POLICY_CONFIG } from '../../domain/policy.ts';
+import { verifyEventSignature } from '../crypto/signer.ts';
 
 export class HybridEventStore implements EventStore {
   private canonDir: string;
@@ -50,12 +52,14 @@ export class HybridEventStore implements EventStore {
       );
       CREATE TABLE IF NOT EXISTS memory_events (
         id TEXT PRIMARY KEY,
+        schema_version INTEGER NOT NULL DEFAULT 1,
         entity_key TEXT NOT NULL,
         logical_ts INTEGER NOT NULL,
         event_type TEXT NOT NULL,
         slot_type TEXT,
         value TEXT NOT NULL,
         authority INTEGER NOT NULL,
+        signature TEXT,
         supersedes_event_id TEXT,
         resolves_event_ids TEXT,
         source_session_id TEXT,
@@ -64,6 +68,14 @@ export class HybridEventStore implements EventStore {
       CREATE INDEX IF NOT EXISTS idx_events_key ON memory_events(entity_key);
       CREATE INDEX IF NOT EXISTS idx_events_ts ON memory_events(logical_ts);
     `);
+
+    // Migraciones idempotentes si la tabla ya existia previamente en disco
+    try {
+      this.db.exec(`ALTER TABLE memory_events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;`);
+    } catch {}
+    try {
+      this.db.exec(`ALTER TABLE memory_events ADD COLUMN signature TEXT;`);
+    } catch {}
   }
 
   // Sincroniza la cache SQLite con el JSONL validando el hash SHA-256 del archivo
@@ -90,9 +102,9 @@ export class HybridEventStore implements EventStore {
 
     const insertStmt = this.db.prepare(`
       INSERT INTO memory_events (
-        id, entity_key, logical_ts, event_type, slot_type, value, authority,
-        supersedes_event_id, resolves_event_ids, source_session_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, schema_version, entity_key, logical_ts, event_type, slot_type, value, authority,
+        signature, supersedes_event_id, resolves_event_ids, source_session_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const evt of events) {
@@ -101,14 +113,23 @@ export class HybridEventStore implements EventStore {
       const supersedesId = evt.type === 'SUPERSEDE' ? evt.supersedes_event_id : null;
       const resolvesIds = evt.type === 'RESOLVE_CONFLICT' ? JSON.stringify(evt.resolves_event_ids) : null;
 
+      // Candado de seguridad: si el evento afirma autoridad > 40 sin firma HMAC valida,
+      // se degrada estrictamente a INFERRED (40) en la cache activa
+      let effectiveAuthority = evt.authority;
+      if (effectiveAuthority > 40 && !verifyEventSignature(evt)) {
+        effectiveAuthority = 40;
+      }
+
       insertStmt.run(
         evt.id,
+        evt.schema_version ?? 1,
         evt.entity_key,
         evt.logical_ts ?? 0,
         evt.type,
         slotType,
         value,
-        evt.authority,
+        effectiveAuthority,
+        evt.signature ?? null,
         supersedesId,
         resolvesIds,
         evt.source_session_id ?? null,
@@ -123,29 +144,40 @@ export class HybridEventStore implements EventStore {
     updateMetaStmt.run(currentHash);
 
     // Escaneo proactivo post-rebuild para atrapar contradicciones de merge de inmediato
-    const projection = fold(events);
+    const projection = fold(events, DEFAULT_POLICY_CONFIG, (e) => verifyEventSignature(e));
     const conflicts = Array.from(projection.conflicts.values());
 
     return { reloaded: true, conflicts };
   }
 
-  async append(event: MemoryEvent): Promise<void> {
+  async withLock<T>(action: () => Promise<T>): Promise<T> {
     const releaseLock = await this.acquireLock();
     try {
-      // Re-leemos el disco bajo lock para obtener el reloj logico exacto y evitar colisiones
-      const diskEvents = this.readEventsFromDisk();
-      const currentMaxTs = diskEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
-      event.logical_ts = currentMaxTs + 1;
-
-      // Escribir en texto plano en events.jsonl
-      const line = JSON.stringify(event) + '\n';
-      appendFileSync(this.jsonlPath, line, 'utf8');
-
-      // Actualizar cache local
-      this.syncCache();
+      return await action();
     } finally {
       releaseLock();
     }
+  }
+
+  // Version para ser ejecutada dentro de withLock() evitando deadlocks por reentrancia
+  appendUnlocked(event: MemoryEvent): void {
+    const diskEvents = this.readEventsFromDisk();
+    const currentMaxTs = diskEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
+    event.logical_ts = currentMaxTs + 1;
+    event.schema_version = event.schema_version ?? 1;
+
+    // Escribir en texto plano en events.jsonl
+    const line = JSON.stringify(event) + '\n';
+    appendFileSync(this.jsonlPath, line, 'utf8');
+
+    // Actualizar cache local
+    this.syncCache();
+  }
+
+  async append(event: MemoryEvent): Promise<void> {
+    await this.withLock(async () => {
+      this.appendUnlocked(event);
+    });
   }
 
   async getEvents(entityKey: string): Promise<MemoryEvent[]> {
@@ -208,9 +240,11 @@ export class HybridEventStore implements EventStore {
   private mapRowToEvent(row: any): MemoryEvent {
     const base = {
       id: row.id,
+      schema_version: row.schema_version ?? 1,
       entity_key: row.entity_key,
       logical_ts: row.logical_ts,
       authority: row.authority,
+      signature: row.signature ?? undefined,
       source_session_id: row.source_session_id ?? undefined,
       created_at: row.created_at,
     };

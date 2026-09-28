@@ -45,25 +45,28 @@ scratch/canon/
 
 ---
 
-## Principios Clave
+## Principios Clave y Modelo de Amenazas
 
-1. **Supersesión Estructural por Cardinalidad:**
-   - **Slots de valor único** (`SINGLE_VALUED`): `dep:tailwindcss:version`, `db:pk_format`. Una nueva aserción **es** una supersesión automática. Sin NLP.
+1. **Jerarquía de Autoridad y Candado HMAC (Defensa contra Inyecciones):**
+   - **Canal de Máxima Autoridad (`USER_EXPLICIT = 100`):** Solo accesible vía canal confiable (`npm run canon learn`), firmado con clave secreta HMAC-SHA256 almacenada fuera del workspace (`~/.canon/secret.key`) y con valla interactiva TTY.
+   - **Canal MCP de Agentes:** Toda llamada vía `canon_assert_fact` está estrictamente fijada en **`INFERRED = 40`**. Ningún parámetro del agente puede alterar su autoridad.
+   - **Degradación Criptográfica Automática:** Si un atacante o prompt injection pega una línea con `"authority": 100` directamente en `events.jsonl`, el motor detecta la falta de firma HMAC y **degrada el evento inmediatamente a 40 (`INFERRED`)**.
+2. **Gobernanza Fail-Closed y Prevención de Bifurcación Léxica:**
+   - **Fail-Closed en Namespaces:** Cualquier clave fuera de `canon_policy.yaml` se rechaza. Para habilitar un nuevo subsistema, el humano debe registrarlo con `npm run canon register <namespace>`.
+   - **Validación de Hojas:** Si en `convention:git` ya existe la hoja `branch_naming`, un intento del agente de asertar `branch_format` es bloqueado informándole las hojas conocidas, a menos que pase explícitamente `new_leaf: true`.
+3. **Registro de Desafíos (No se pierde la señal):**
+   - Si un evento de autoridad 40 (inferido) contradice un hecho de autoridad superior (100 u 80), **no se rechaza en silencio**. Se almacena y se marca en **disputa (`CONFLICT`)**, permitiendo que `canon_query_active` muestre el hecho con la etiqueta `⚠️ [EN DISPUTA]` para arbitraje humano.
+4. **Supersesión Estructural por Cardinalidad:**
+   - **Slots de valor único** (`SINGLE_VALUED`): `dep:tailwindcss:version`, `db:pk_format`. Una nueva aserción legítima supersede la anterior sin adivinanzas de NLP.
    - **Slots acumulativos** (`ACCUMULATIVE`): `learned:gotchas:*`. Conviven como lista aditiva de quirks.
-2. **Jerarquía de Autoridad y Reloj Lógico (Lamport Clock):**
-   - `USER_EXPLICIT (100)` > `REPO_ORACLE (90)` > `CODE_VERIFIED (80)` > `INFERRED (40)`.
-   - Cada evento porta un `logical_ts`. El reductor ordena por causalidad lógica antes de plegar: **inmune a intercalaciones desordenadas de un merge de Git**.
-3. **Colaboración en Git y Almacenamiento Híbrido:**
+5. **Reloj Lógico de Lamport y Almacenamiento Híbrido:**
    - **Fuente de verdad:** `.canon/events.jsonl` (append-only de texto plano, versionado en Git, mergeable sin conflictos binarios).
    - **Acelerador local:** `.canon/cache.db` (SQLite efímero en `.gitignore`, invalidado automáticamente por hash SHA-256 al detectar un `git pull`).
-   - **Mutex atómico de filesystem:** Bloquea escrituras concurrentes entre múltiples ventanas de Antigravity sobre el mismo repo.
-4. **Soporte Nativo para Monorepos (PathResolver):**
-   - Búsqueda ascendente desde el archivo activo (`context_path`) hacia el boundary marker más cercano (`package.json`, `go.mod`, etc.).
-   - **Techo duro en `.git/`:** La búsqueda jamás cruza la raíz del repositorio hacia carpetas personales del sistema.
-5. **Oráculo Mecánico del Repositorio:**
-   - Audita automáticamente el disco (`package.json`) contra la memoria activa para auto-corregir dependencias desactualizadas.
-6. **Cero Dependencias Externas de NPM:**
-   - Utiliza TypeScript nativo (`--experimental-strip-types`), `node:sqlite` nativo y `node:test` nativo de Node 24.
+   - **Mutex atómico de filesystem:** `withLock()` envuelve lectura + decisión + append de forma atómica para prevenir condiciones de carrera entre ventanas concurrentes.
+6. **Stopgap Anti-Loop:**
+   - Rate limit temporal de ráfaga (10 aserciones por minuto por proyecto) como stopgap mientras se implementa el `turn_id` a nivel de cliente.
+7. **Cero Dependencias Externas de NPM:**
+   - Utiliza TypeScript nativo (`--experimental-strip-types`), `node:sqlite` nativo y `node:test` nativo de Node 24. Tests ejecutados en **~500 ms**.
 
 ---
 

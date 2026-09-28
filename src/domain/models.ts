@@ -15,9 +15,11 @@ export type AuthorityLevel = number;
 
 export interface BaseEvent {
   id: string;
+  schema_version?: number; // Version del esquema de eventos (1 por defecto)
   entity_key: string;
   logical_ts: number; // Reloj logico para orden total causal (inmune a merges desordenados de Git)
   authority: AuthorityLevel;
+  signature?: string; // HMAC-SHA256 para eventos con authority > 40 emitidos por canales confiables
   source_session_id?: string;
   created_at: string;
 }
@@ -26,6 +28,7 @@ export interface AssertEvent extends BaseEvent {
   type: 'ASSERT';
   slot_type: SlotCardinality;
   value: string;
+  supersedes_event_id?: string; // ID opcional del evento que se busca actualizar
 }
 
 export interface SupersedeEvent extends BaseEvent {

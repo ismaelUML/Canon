@@ -9,7 +9,19 @@ export class InMemoryEventStore implements EventStore {
   private events: MemoryEvent[] = [];
 
   async append(event: MemoryEvent): Promise<void> {
+    this.appendUnlocked(event);
+  }
+
+  appendUnlocked(event: MemoryEvent): void {
+    if (!event.logical_ts || event.logical_ts === 0) {
+      const currentMaxTs = this.events.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
+      event.logical_ts = currentMaxTs + 1;
+    }
     this.events.push(event);
+  }
+
+  async withLock<T>(action: () => Promise<T>): Promise<T> {
+    return await action();
   }
 
   async getEvents(entityKey: string): Promise<MemoryEvent[]> {

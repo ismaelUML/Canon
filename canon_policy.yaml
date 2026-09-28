@@ -8,5 +8,7 @@ rules:
   "security:*": "interrupt"    # Tokens, almacenamiento de sesion, CORS, auth
   "convention:*": "soft_lww"   # Estilos de codigo, linters, ramas de git
   "dev_local:*": "auto_latest" # Puertos locales, flags temporales de dev
+  "dep:*": "soft_lww"          # Dependencias de paquetes y herramientas
+  "learned:*": "soft_lww"      # Gotchas y quirks aprendidos
 
-defaultPolicy: "soft_lww"
+defaultPolicy: "interrupt"     # FAIL-CLOSED: namespaces desconocidos requieren intervencion humana

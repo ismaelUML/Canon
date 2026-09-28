@@ -23,9 +23,12 @@ export function createEmptyProjection(): Projection {
   };
 }
 
+export type SignatureVerifier = (event: MemoryEvent) => boolean;
+
 export function fold(
   events: MemoryEvent[],
-  policy: PolicyConfig = DEFAULT_POLICY_CONFIG
+  policy: PolicyConfig = DEFAULT_POLICY_CONFIG,
+  verifySignature?: SignatureVerifier
 ): Projection {
   const projection = createEmptyProjection();
   // Orden causal total: Git 3-way merge no garantiza el orden de las lineas en texto,
@@ -33,7 +36,15 @@ export function fold(
   const sorted = [...events].sort((a, b) => 
     (a.logical_ts ?? 0) - (b.logical_ts ?? 0) || a.id.localeCompare(b.id)
   );
-  for (const event of sorted) {
+  for (const rawEvent of sorted) {
+    // Si hay un verificador activo y el evento afirma autoridad > 40 sin firma valida,
+    // se degrada estrictamente a INFERRED (40) para neutralizar manipulaciones o inyecciones.
+    let event = rawEvent;
+    if (verifySignature && rawEvent.authority > 40) {
+      if (!verifySignature(rawEvent)) {
+        event = { ...rawEvent, authority: 40 };
+      }
+    }
     applyEvent(projection, event, policy);
   }
   return projection;
@@ -97,13 +108,45 @@ function handleSingleValuedAssert(
     return;
   }
 
-  // Si el valor es exactamente el mismo, no hacemos lio (idempotencia)
+  // Si el valor es exactamente el mismo: si la autoridad entrante es mayor, promovemos la autoridad; si no, idempotencia
   if (existing.value === event.value) {
+    if (event.authority > existing.authority) {
+      projection.superseded_event_ids.add(existing.source_event_id);
+      setSingleFact(projection, event);
+    }
     return;
   }
 
-  // Menor autoridad no puede voltear una decision de mayor autoridad
+  // Si el nuevo evento intenta superseder explicitamente al anterior
+  if (event.supersedes_event_id && event.supersedes_event_id === existing.source_event_id) {
+    if (event.authority >= existing.authority) {
+      projection.superseded_event_ids.add(existing.source_event_id);
+      setSingleFact(projection, event);
+      return;
+    }
+  }
+
+  // Menor autoridad no puede voltear una decision de mayor autoridad, pero si el valor difiere,
+  // se registra como DESAFIO (disputa) para no perder la señal en query_active_state
   if (event.authority < existing.authority) {
+    const disputeConflict: ConflictState = {
+      entity_key: event.entity_key,
+      conflicting_events: [
+        {
+          id: existing.source_event_id,
+          entity_key: existing.entity_key,
+          type: 'ASSERT',
+          slot_type: existing.slot_type,
+          value: existing.value,
+          authority: existing.authority,
+          created_at: existing.updated_at,
+        },
+        event,
+      ],
+      reason: `Desafío: el hecho activo (autoridad ${existing.authority}: '${existing.value}') fue disputado por inferencia de menor autoridad (${event.authority}: '${event.value}')`,
+      detected_at: event.created_at,
+    };
+    projection.conflicts.set(event.entity_key, disputeConflict);
     return;
   }
 

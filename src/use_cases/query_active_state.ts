@@ -72,7 +72,9 @@ export class QueryActiveStateUseCase {
     if (facts.length > 0) {
       lines.push('HECHOS ACTIVOS:');
       for (const f of facts) {
-        lines.push(`- [${f.entity_key}] = ${f.value}`);
+        const hasDispute = conflicts.some((c) => c.entity_key === f.entity_key);
+        const disputeTag = hasDispute ? ' ⚠️ [EN DISPUTA]' : '';
+        lines.push(`- [${f.entity_key}] = ${f.value} (id: ${f.source_event_id}, authority: ${f.authority})${disputeTag}`);
       }
     } else if (conflicts.length === 0) {
       lines.push('(Sin hechos activos registrados)');

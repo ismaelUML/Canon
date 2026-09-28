@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --test tests/benchmark/*.test.ts tests/unit/*.test.ts",
     "test:staleness": "node --experimental-strip-types --test tests/benchmark/*.test.ts",
-    "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts"
+    "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts",
+    "canon": "node --experimental-strip-types src/cli/canon_cli.ts"
   },
   "keywords": [
     "antigravity",

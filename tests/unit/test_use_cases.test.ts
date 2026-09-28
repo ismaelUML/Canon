@@ -4,35 +4,90 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { InMemoryEventStore } from '../../src/adapters/storage/in_memory.ts';
-import { AssertFactUseCase, MAX_ASSERTIONS_PER_TURN } from '../../src/use_cases/assert_fact.ts';
+import { AssertFactUseCase } from '../../src/use_cases/assert_fact.ts';
 import { QueryActiveStateUseCase } from '../../src/use_cases/query_active_state.ts';
 import { ResolveConflictUseCase } from '../../src/use_cases/resolve_conflict.ts';
 import { Authority } from '../../src/domain/models.ts';
 
-test('Use Case: Limite anti-loop bloquea aserciones excesivas en un turno', async () => {
+test('Use Case: Fail-closed rechaza claves fuera de namespaces registrados', async () => {
   const store = new InMemoryEventStore();
   const assertCase = new AssertFactUseCase(store);
 
-  // Turn count por debajo del limite: permitido
-  const res1 = await assertCase.execute({
-    entity_key: 'convention:formatting',
+  // Clave en namespace no registrado (ej: arch:*)
+  const res = await assertCase.execute({
+    entity_key: 'arch:pattern:redux',
     slot_type: 'SINGLE_VALUED',
-    value: 'prettier',
+    value: 'toolkit',
+    authority: Authority.INFERRED,
+  });
+  assert.strictEqual(res.ok, false);
+  assert.match(res.error!, /no pertenece a ningún namespace registrado/);
+});
+
+test('Use Case: Validacion de hojas bloquea bifurcacion lexica sin flag new_leaf', async () => {
+  const store = new InMemoryEventStore();
+  const assertCase = new AssertFactUseCase(store);
+
+  // 1. Establecemos la primera hoja en convention:git
+  const res1 = await assertCase.execute({
+    entity_key: 'convention:git:branch_naming',
+    slot_type: 'SINGLE_VALUED',
+    value: 'feat/*',
     authority: Authority.USER_EXPLICIT,
-    turn_count: 2,
   });
   assert.strictEqual(res1.ok, true);
 
-  // Turn count supera el tope anti-loop: rechazado
+  // 2. Un agente intenta inventar branch_format sin new_leaf: true
   const res2 = await assertCase.execute({
-    entity_key: 'convention:formatting',
+    entity_key: 'convention:git:branch_format',
     slot_type: 'SINGLE_VALUED',
-    value: 'biome',
-    authority: Authority.USER_EXPLICIT,
-    turn_count: MAX_ASSERTIONS_PER_TURN,
+    value: 'feat/*',
+    authority: Authority.INFERRED,
   });
   assert.strictEqual(res2.ok, false);
-  assert.match(res2.error!, /Tope anti-loop alcanzado/);
+  assert.match(res2.error!, /Hoja no reconocida 'branch_format'/);
+  assert.match(res2.error!, /branch_naming/);
+
+  // 3. Con new_leaf: true, se acepta legítimamente
+  const res3 = await assertCase.execute({
+    entity_key: 'convention:git:branch_format',
+    slot_type: 'SINGLE_VALUED',
+    value: 'feat/*',
+    authority: Authority.INFERRED,
+    new_leaf: true,
+  });
+  assert.strictEqual(res3.ok, true);
+});
+
+test('Use Case: Desafio de menor autoridad genera conflicto sin perder señal', async () => {
+  const store = new InMemoryEventStore();
+  const assertCase = new AssertFactUseCase(store);
+  const queryCase = new QueryActiveStateUseCase(store);
+
+  // Hecho de autoridad alta (100)
+  await assertCase.execute({
+    entity_key: 'db:pk_format',
+    slot_type: 'SINGLE_VALUED',
+    value: 'uuidv4',
+    authority: Authority.USER_EXPLICIT,
+  });
+
+  // El agente deduce ULID (autoridad 40)
+  const resDispute = await assertCase.execute({
+    entity_key: 'db:pk_format',
+    slot_type: 'SINGLE_VALUED',
+    value: 'ulid',
+    authority: Authority.INFERRED,
+  });
+  assert.strictEqual(resDispute.ok, true);
+
+  // La consulta de estado activo debe reportar el hecho original y el conflicto de desafio
+  const activeState = await queryCase.execute({ anchor: 'db:pk_format' });
+  assert.strictEqual(activeState.facts.length, 1);
+  assert.strictEqual(activeState.facts[0].value, 'uuidv4');
+  assert.strictEqual(activeState.conflicts.length, 1);
+  assert.match(activeState.conflicts[0].reason, /Desafío/);
+  assert.match(activeState.formattedContext, /EN DISPUTA/);
 });
 
 test('Use Case: QueryActiveState filtra por anchor y formatea contexto para prompt', async () => {

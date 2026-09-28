@@ -37,9 +37,13 @@ const TOOLS = [
           type: 'string',
           description: 'El valor o regla a registrar (sin secretos ni tokens)',
         },
-        authority: {
-          type: 'number',
-          description: 'Nivel de autoridad: 100 (USER_EXPLICIT), 80 (CODE_VERIFIED), 40 (INFERRED). Por defecto 100.',
+        supersedes_event_id: {
+          type: 'string',
+          description: 'ID opcional del evento activo que se busca actualizar',
+        },
+        new_leaf: {
+          type: 'boolean',
+          description: 'Establecer en true si se desea crear una nueva hoja bajo un subsistema conocido',
         },
       },
       required: ['context_path', 'entity_key', 'slot_type', 'value'],
@@ -98,6 +102,10 @@ const TOOLS = [
 
 export class MCPServer {
   private stores: Map<string, HybridEventStore> = new Map();
+  // Rate limiter por ventana temporal como stopgap anti-loop
+  private rateLimitMap: Map<string, number[]> = new Map();
+  private maxAssertionsPerWindow: number = 10;
+  private rateLimitWindowMs: number = 60_000;
 
   constructor() {}
 
@@ -194,11 +202,23 @@ export class MCPServer {
     const resolveCase = new ResolveConflictUseCase(store);
 
     if (name === 'canon_assert_fact') {
+      const now = Date.now();
+      const timestamps = (this.rateLimitMap.get(rootDir) ?? []).filter(
+        (t) => now - t < this.rateLimitWindowMs
+      );
+      if (timestamps.length >= this.maxAssertionsPerWindow) {
+        return `❌ Rate limit temporal alcanzado (${this.maxAssertionsPerWindow} aserciones por minuto para este proyecto). Esperá unos segundos antes de reintentar. (Nota: stopgap temporal; solución definitiva requiere turn_id del cliente).`;
+      }
+      timestamps.push(now);
+      this.rateLimitMap.set(rootDir, timestamps);
+
       const res = await assertCase.execute({
         entity_key: args.entity_key,
         slot_type: args.slot_type as SlotCardinality,
         value: args.value,
-        authority: args.authority ?? Authority.USER_EXPLICIT,
+        authority: Authority.INFERRED, // Forzado por canal: todo lo que entra por MCP es INFERRED (40)
+        supersedes_event_id: args.supersedes_event_id,
+        new_leaf: args.new_leaf,
       });
       if (!res.ok) {
         return `❌ Error al registrar asercion: ${res.error}`;

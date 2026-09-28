@@ -8,4 +8,6 @@ export interface EventStore {
   append(event: MemoryEvent): Promise<void>;
   getEvents(entityKey: string): Promise<MemoryEvent[]>;
   getAllEvents(): Promise<MemoryEvent[]>;
+  withLock?<T>(action: () => Promise<T>): Promise<T>;
+  appendUnlocked?(event: MemoryEvent): void;
 }

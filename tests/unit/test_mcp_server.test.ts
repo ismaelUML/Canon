@@ -68,3 +68,42 @@ test('MCP Server: tools/call ejecuta aserciones y consultas en vivo', async () =
   assert.match(queryResp.result.content[0].text, /convention:git:branch_naming/);
   assert.match(queryResp.result.content[0].text, /dan\/feat-\*/);
 });
+
+test('MCP Server Propiedad: Ninguna llamada por MCP puede producir autoridad mayor a 40', async () => {
+  const server = new MCPServer(':memory:');
+  const attempts = [100, 999, 80, -1, undefined, null, '100'];
+
+  const testRunId = Date.now().toString(36);
+  for (let i = 0; i < attempts.length; i++) {
+    const authorityInput = attempts[i];
+    const key = `convention:test_prop_${testRunId}_${i}`;
+
+    const resp = await server.handleMessage({
+      jsonrpc: '2.0',
+      id: 100 + i,
+      method: 'tools/call',
+      params: {
+        name: 'canon_assert_fact',
+        arguments: {
+          entity_key: key,
+          slot_type: 'SINGLE_VALUED',
+          value: `val_${i}`,
+          authority: authorityInput, // Intento de falsificar o autodeclarar autoridad
+          new_leaf: true,
+        },
+      },
+    });
+
+    assert.strictEqual(resp.id, 100 + i);
+    assert.match(resp.result.content[0].text, /Asercion registrada con id/);
+
+    const { store } = server.getStore();
+    const storedEvents = await store.getEvents(key);
+    assert.strictEqual(storedEvents.length, 1);
+    assert.strictEqual(
+      storedEvents[0].authority,
+      40,
+      `Para input ${authorityInput}, la autoridad almacenada DEBE ser estrictamente 40 (INFERRED)`
+    );
+  }
+});
