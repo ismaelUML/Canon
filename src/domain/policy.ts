@@ -52,16 +52,13 @@ export function isKeyRegistered(entityKey: string, config: PolicyConfig = DEFAUL
 }
 
 // Extrae el subsistema de una clave jerarquica (ej: 'convention:git:branch_naming' -> 'convention:git')
-export function extractSubsystemAndLeaf(entityKey: string): { subsystem: string; leaf: string } {
+export function extractSubsystemAndLeaf(entityKey: string): { subsystem: string; leaf: string; hasSubsystem: boolean } {
   const parts = entityKey.split(':');
-  if (parts.length <= 1) {
-    return { subsystem: parts[0], leaf: parts[0] };
-  }
-  if (parts.length === 2) {
-    return { subsystem: parts[0], leaf: parts[1] };
+  if (parts.length <= 2) {
+    return { subsystem: parts[0], leaf: parts[1] ?? parts[0], hasSubsystem: false };
   }
   // Mas de 2 partes: los primeros N-1 son subsistema, el ultimo es la hoja
   const leaf = parts[parts.length - 1];
   const subsystem = parts.slice(0, parts.length - 1).join(':');
-  return { subsystem, leaf };
+  return { subsystem, leaf, hasSubsystem: true };
 }

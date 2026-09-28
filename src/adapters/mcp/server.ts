@@ -11,7 +11,8 @@ import { QueryActiveStateUseCase } from '../../use_cases/query_active_state.ts';
 import { ResolveConflictUseCase } from '../../use_cases/resolve_conflict.ts';
 import { RepoOracle } from '../oracle/repo_oracle.ts';
 import { Authority } from '../../domain/models.ts';
-import type { SlotCardinality } from '../../domain/models.ts';
+import { InMemoryEventStore } from '../storage/in_memory.ts';
+import type { EventStore } from '../../ports/event_store.ts';
 
 const TOOLS = [
   {
@@ -41,10 +42,6 @@ const TOOLS = [
           type: 'string',
           description: 'ID opcional del evento activo que se busca actualizar',
         },
-        new_leaf: {
-          type: 'boolean',
-          description: 'Establecer en true si se desea crear una nueva hoja bajo un subsistema conocido',
-        },
       },
       required: ['context_path', 'entity_key', 'slot_type', 'value'],
     },
@@ -68,24 +65,6 @@ const TOOLS = [
     },
   },
   {
-    name: 'canon_resolve_conflict',
-    description: 'Resuelve explicitamente una contradiccion de misma autoridad en Canon.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entity_key: { type: 'string' },
-        resolves_event_ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Lista de IDs de eventos en pugna que quedan sepultados',
-        },
-        winning_value: { type: 'string', description: 'El valor ganador acordado' },
-        authority: { type: 'number', description: 'Autoridad de la resolucion (ej: 100)' },
-      },
-      required: ['entity_key', 'resolves_event_ids', 'winning_value'],
-    },
-  },
-  {
     name: 'canon_audit_repo',
     description: 'Audita mecanicamente la memoria contra el package.json del proyecto para auto-corregir dependencias desactualizadas.',
     inputSchema: {
@@ -102,14 +81,24 @@ const TOOLS = [
 
 export class MCPServer {
   private stores: Map<string, HybridEventStore> = new Map();
+  private customStore?: EventStore;
   // Rate limiter por ventana temporal como stopgap anti-loop
   private rateLimitMap: Map<string, number[]> = new Map();
   private maxAssertionsPerWindow: number = 10;
   private rateLimitWindowMs: number = 60_000;
 
-  constructor() {}
+  constructor(customStoreOrMode?: string | EventStore) {
+    if (customStoreOrMode === ':memory:') {
+      this.customStore = new InMemoryEventStore();
+    } else if (typeof customStoreOrMode === 'object') {
+      this.customStore = customStoreOrMode;
+    }
+  }
 
-  getStore(contextPath?: string): { store: HybridEventStore; rootDir: string } {
+  getStore(contextPath?: string): { store: EventStore; rootDir: string } {
+    if (this.customStore) {
+      return { store: this.customStore, rootDir: ':memory:' };
+    }
     const targetPath = contextPath ?? process.cwd();
     const resolved = resolveProjectRoot(targetPath);
     let store = this.stores.get(resolved.canonDir);
@@ -218,7 +207,6 @@ export class MCPServer {
         value: args.value,
         authority: Authority.INFERRED, // Forzado por canal: todo lo que entra por MCP es INFERRED (40)
         supersedes_event_id: args.supersedes_event_id,
-        new_leaf: args.new_leaf,
       });
       if (!res.ok) {
         return `❌ Error al registrar asercion: ${res.error}`;
@@ -232,13 +220,7 @@ export class MCPServer {
     }
 
     if (name === 'canon_resolve_conflict') {
-      const res = await resolveCase.execute({
-        entity_key: args.entity_key,
-        resolves_event_ids: args.resolves_event_ids ?? [],
-        winning_value: args.winning_value,
-        authority: args.authority ?? Authority.USER_EXPLICIT,
-      });
-      return `✅ Conflicto en '${args.entity_key}' resuelto en ${rootDir}. Hecho ganador: '${args.winning_value}'.`;
+      return `❌ No autorizado: Los agentes no tienen permiso para resolver conflictos. La resolución de conflictos es una decisión humana que debe ejecutarse vía CLI: 'npm run canon resolve ${args.entity_key} <winning_value> <event_ids...>'.`;
     }
 
     if (name === 'canon_audit_repo') {

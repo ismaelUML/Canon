@@ -3,9 +3,10 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fork } from 'node:child_process';
 import { resolveProjectRoot } from '../../src/adapters/resolver/path_resolver.ts';
 import { HybridEventStore } from '../../src/adapters/storage/hybrid_store.ts';
 import { fold } from '../../src/domain/fold.ts';
@@ -50,37 +51,81 @@ test('PathResolver: Aisla subproyectos en monorepos y frena en techo duro .git',
   rmSync(root, { recursive: true, force: true });
 });
 
-test('HybridStore: Concurrencia real bajo lock atomico genera logical_ts secuencial sin corrupcion', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'canon-lock-test-'));
+test('HybridStore: Concurrencia real bajo lock atomico genera logical_ts secuencial sin corrupcion (2 procesos child_process)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'canon-lock-proc-test-'));
   const canonDir = join(root, '.canon');
-  const store = new HybridEventStore(canonDir);
+  mkdirSync(canonDir, { recursive: true });
 
-  // Disparamos 10 escrituras concurrentes simultaneas
-  const promises = Array.from({ length: 10 }).map((_, i) => {
-    const evt: AssertEvent = {
-      id: `evt_concurrent_${i}`,
-      entity_key: `test:item:${i}`,
-      logical_ts: 0, // El store debe asignar max(disco) + 1 secuencialmente
-      slot_type: 'SINGLE_VALUED',
-      value: `val_${i}`,
-      authority: Authority.USER_EXPLICIT,
-      created_at: new Date().toISOString(),
-      type: 'ASSERT',
-    };
-    return store.append(evt);
+  // Pre-inicializamos la base SQLite para que las tablas existan antes de que los dos procesos compitan
+  const initStore = new HybridEventStore(canonDir);
+  initStore.close();
+
+  const workerScript = join(import.meta.dirname, '../helpers/concurrency_worker.ts');
+
+  // Lanzamos dos procesos Node reales e independientes compitiendo por el mismo events.jsonl
+  const p1 = new Promise<void>((resolve, reject) => {
+    const cp = fork(workerScript, [canonDir, 'procA', '5'], {
+      execArgv: ['--experimental-strip-types'],
+    });
+    cp.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`procA fallo con exit code ${code}`))));
   });
 
-  await Promise.all(promises);
+  const p2 = new Promise<void>((resolve, reject) => {
+    const cp = fork(workerScript, [canonDir, 'procB', '5'], {
+      execArgv: ['--experimental-strip-types'],
+    });
+    cp.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`procB fallo con exit code ${code}`))));
+  });
+
+  await Promise.all([p1, p2]);
 
   // 1. Validar que events.jsonl tiene exactamente 10 lineas validas
   const jsonlPath = join(canonDir, 'events.jsonl');
   const lines = readFileSync(jsonlPath, 'utf8').trim().split('\n');
-  assert.strictEqual(lines.length, 10);
+  assert.strictEqual(lines.length, 10, 'Deben existir exactamente 10 lineas escritas por ambos procesos');
 
-  // 2. Validar que cada linea es JSON valido y los logical_ts van del 1 al 10
+  // 2. Validar que cada linea es JSON valido y los logical_ts van estrictamente del 1 al 10 sin duplicados
   const parsed = lines.map((l) => JSON.parse(l));
   const timestamps = parsed.map((e) => e.logical_ts).sort((a, b) => a - b);
   assert.deepStrictEqual(timestamps, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+  // 3. Validar que 5 eventos son de procA y 5 son de procB
+  const procAEvents = parsed.filter((e) => e.id.startsWith('evt_procA_'));
+  const procBEvents = parsed.filter((e) => e.id.startsWith('evt_procB_'));
+  assert.strictEqual(procAEvents.length, 5);
+  assert.strictEqual(procBEvents.length, 5);
+
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HybridStore: Recuperacion automatica de stale lock huerfano si el proceso anterior murio', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'canon-stale-lock-'));
+  const canonDir = join(root, '.canon');
+  mkdirSync(canonDir, { recursive: true });
+
+  const lockPath = join(canonDir, 'events.jsonl.lock');
+  mkdirSync(lockPath); // Simulamos que un proceso murio intempestivamente y dejo el lock creado
+
+  // Modificamos mtime a 10 segundos en el pasado para simular lock huerfano
+  const past = new Date(Date.now() - 10_000);
+  utimesSync(lockPath, past, past);
+
+  const store = new HybridEventStore(canonDir);
+  // Debe romper el lock stale y escribir exitosamente
+  await store.append({
+    id: 'evt_after_stale',
+    entity_key: 'config:recovered',
+    logical_ts: 0,
+    slot_type: 'SINGLE_VALUED',
+    value: 'ok',
+    authority: Authority.USER_EXPLICIT,
+    created_at: new Date().toISOString(),
+    type: 'ASSERT',
+  });
+
+  const events = await store.getEvents('config:recovered');
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].value, 'ok');
 
   store.close();
   rmSync(root, { recursive: true, force: true });

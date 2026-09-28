@@ -75,14 +75,64 @@ export async function runCli(args: string[]): Promise<void> {
       type: 'ASSERT',
     };
 
-    // Candado criptografico: firmar con HMAC fuera del workspace
-    rawEvent.signature = signEvent(rawEvent);
+    await store.withLock(async () => {
+      const allEvents = await store.getAllEvents();
+      const maxTs = allEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
+      rawEvent.logical_ts = maxTs + 1;
+      rawEvent.signature = signEvent(rawEvent);
+      store.appendUnlocked(rawEvent);
+    });
 
-    await store.append(rawEvent);
     console.log(`✅ [CANON LEARN] Hecho registrado con autoridad USER_EXPLICIT (100) en ${rootDir}`);
     console.log(`   ID: ${eventId}`);
     console.log(`   Clave: ${key} = ${val}`);
     console.log(`   Firma HMAC: ${rawEvent.signature.slice(0, 16)}...`);
+    return;
+  }
+
+  if (command === 'resolve') {
+    const isTTY = Boolean(process.stdin.isTTY || process.stdout.isTTY);
+    const isConfirmed = args.includes('--interactive-confirmed') || process.env.CANON_ALLOW_NON_TTY === '1';
+
+    if (!isTTY && !isConfirmed) {
+      console.error('❌ Error de seguridad: canon resolve requiere confirmación humana interactiva (TTY).');
+      process.exit(1);
+    }
+
+    const key = args[3];
+    const winningVal = args[4];
+    const resolveIds = args.slice(5).filter((a) => !a.startsWith('--'));
+
+    if (!key || !winningVal || resolveIds.length === 0) {
+      console.error('❌ Error: Se requiere <entity_key> <winning_value> <resolves_event_id1> [id2...]');
+      process.exit(1);
+    }
+
+    const eventId = `res_${randomUUID()}`;
+    const createdAt = new Date().toISOString();
+
+    const resolveEvent = {
+      id: eventId,
+      schema_version: 1,
+      entity_key: key,
+      logical_ts: 0,
+      resolves_event_ids: resolveIds,
+      winning_value: winningVal,
+      authority: Authority.USER_EXPLICIT,
+      created_at: createdAt,
+      type: 'RESOLVE_CONFLICT' as const,
+      signature: '',
+    };
+
+    await store.withLock(async () => {
+      const allEvents = await store.getAllEvents();
+      const maxTs = allEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
+      resolveEvent.logical_ts = maxTs + 1;
+      resolveEvent.signature = signEvent(resolveEvent);
+      store.appendUnlocked(resolveEvent);
+    });
+
+    console.log(`✅ [CANON RESOLVE] Conflicto resuelto para '${key}'. Hecho ganador: '${winningVal}' (id: ${eventId})`);
     return;
   }
 

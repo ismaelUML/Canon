@@ -67,4 +67,5 @@ export interface Projection {
   active_facts: Map<string, ActiveFact[]>;
   conflicts: Map<string, ConflictState>;
   superseded_event_ids: Set<string>;
+  degraded_events_count?: number; // Contador de eventos degradados a 40 por firma HMAC invalida/ausente
 }

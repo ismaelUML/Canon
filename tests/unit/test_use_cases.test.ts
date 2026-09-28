@@ -48,13 +48,12 @@ test('Use Case: Validacion de hojas bloquea bifurcacion lexica sin flag new_leaf
   assert.match(res2.error!, /Hoja no reconocida 'branch_format'/);
   assert.match(res2.error!, /branch_naming/);
 
-  // 3. Con new_leaf: true, se acepta legítimamente
+  // 3. Con autoridad humana (USER_EXPLICIT = 100), se acepta legítimamente (ej: via CLI 'canon learn')
   const res3 = await assertCase.execute({
     entity_key: 'convention:git:branch_format',
     slot_type: 'SINGLE_VALUED',
     value: 'feat/*',
-    authority: Authority.INFERRED,
-    new_leaf: true,
+    authority: Authority.USER_EXPLICIT,
   });
   assert.strictEqual(res3.ok, true);
 });

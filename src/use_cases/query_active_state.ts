@@ -50,7 +50,7 @@ export class QueryActiveStateUseCase {
     }
 
     // Formateamos un bloque conciso y directo para el prompt de Antigravity
-    const formattedContext = this.formatContext(facts, conflicts);
+    const formattedContext = this.formatContext(facts, conflicts, projection.degraded_events_count);
 
     return {
       facts,
@@ -59,8 +59,12 @@ export class QueryActiveStateUseCase {
     };
   }
 
-  private formatContext(facts: ActiveFact[], conflicts: ConflictState[]): string {
+  private formatContext(facts: ActiveFact[], conflicts: ConflictState[], degradedCount: number = 0): string {
     const lines: string[] = ['[CANON ACTIVE MEMORY]'];
+
+    if (degradedCount > 0) {
+      lines.push(`⚠️ ALERTA DE SEGURIDAD: ${degradedCount} hecho(s) tienen firma HMAC ausente o inválida y fueron degradados a autoridad 40 (posible cambio de máquina, falta de clave en ~/.canon/secret.key o evento de compañero de equipo).`);
+    }
 
     if (conflicts.length > 0) {
       lines.push('⚠️ CONFLICTOS PENDIENTES QUE REQUIEREN ACLARACION:');

@@ -37,13 +37,30 @@ export function getEventSignaturePayload(event: MemoryEvent): string {
       ? event.new_value
       : event.winning_value;
 
+  const supersedesId =
+    event.type === 'SUPERSEDE'
+      ? event.supersedes_event_id
+      : event.type === 'ASSERT'
+      ? event.supersedes_event_id ?? ''
+      : '';
+
+  const resolvesIds =
+    event.type === 'RESOLVE_CONFLICT'
+      ? JSON.stringify(event.resolves_event_ids)
+      : '';
+
   return [
+    String(event.schema_version ?? 1),
     event.id,
     event.entity_key,
+    String(event.logical_ts ?? 0),
     String(event.authority),
+    event.type,
     value,
+    supersedesId,
+    resolvesIds,
     event.created_at,
-  ].join(':');
+  ].join('|');
 }
 
 export function signEvent(event: MemoryEvent, secretKey?: string): string {

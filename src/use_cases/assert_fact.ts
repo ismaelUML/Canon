@@ -16,7 +16,6 @@ export interface AssertFactRequest {
   value: string;
   authority: AuthorityLevel;
   supersedes_event_id?: string;
-  new_leaf?: boolean; // Permite crear una nueva hoja bajo un subsistema conocido
   source_session_id?: string;
 }
 
@@ -76,23 +75,25 @@ export class AssertFactUseCase {
 
     // 4. Ejecutar validacion de subsistema y append de forma atomica bajo Lock
     const executeInLock = async (): Promise<AssertFactResult> => {
-      const { subsystem, leaf } = extractSubsystemAndLeaf(request.entity_key);
-
-      // Verificacion de hojas para evitar bifurcacion lexica (ej: branch_naming vs branch_format)
+      const { subsystem, leaf, hasSubsystem } = extractSubsystemAndLeaf(request.entity_key);
       const allEvents = await this.store.getAllEvents();
-      const existingLeaves = Array.from(
-        new Set(
-          allEvents
-            .filter((e) => e.entity_key.startsWith(subsystem + ':'))
-            .map((e) => extractSubsystemAndLeaf(e.entity_key).leaf)
-        )
-      );
 
-      if (existingLeaves.length > 0 && !existingLeaves.includes(leaf) && !request.new_leaf) {
-        return {
-          ok: false,
-          error: `❌ Hoja no reconocida '${leaf}' en subsistema '${subsystem}'. Hojas conocidas: [${existingLeaves.join(', ')}]. Si realmente deseás crear una hoja nueva, pasá 'new_leaf: true'.`,
-        };
+      // Verificacion de hojas para evitar bifurcacion lexica bajo subsistemas existentes (ej: branch_naming vs branch_format en convention:git)
+      if (hasSubsystem) {
+        const existingLeaves = Array.from(
+          new Set(
+            allEvents
+              .filter((e) => e.entity_key.startsWith(subsystem + ':'))
+              .map((e) => extractSubsystemAndLeaf(e.entity_key).leaf)
+          )
+        );
+
+        if (existingLeaves.length > 0 && !existingLeaves.includes(leaf) && request.authority <= 40) {
+          return {
+            ok: false,
+            error: `❌ Hoja no reconocida '${leaf}' en subsistema '${subsystem}'. Hojas conocidas: [${existingLeaves.join(', ')}]. Para agregar una hoja nueva, debe ser aprobada por el usuario ejecutando: 'npm run canon learn ${request.entity_key} <valor>'.`,
+          };
+        }
       }
 
       // Persistir de forma atomica

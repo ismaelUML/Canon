@@ -23,6 +23,8 @@ export function createEmptyProjection(): Projection {
   };
 }
 
+export const MAX_OPEN_DISPUTES = 5;
+
 export type SignatureVerifier = (event: MemoryEvent) => boolean;
 
 export function fold(
@@ -31,9 +33,21 @@ export function fold(
   verifySignature?: SignatureVerifier
 ): Projection {
   const projection = createEmptyProjection();
+  projection.degraded_events_count = 0;
+
+  // Deduplicacion estricta por ID de evento: impide clones y resurreccion por copiado de lineas
+  const seenIds = new Set<string>();
+  const uniqueEvents: MemoryEvent[] = [];
+  for (const e of events) {
+    if (!seenIds.has(e.id)) {
+      seenIds.add(e.id);
+      uniqueEvents.push(e);
+    }
+  }
+
   // Orden causal total: Git 3-way merge no garantiza el orden de las lineas en texto,
   // pero el reloj logico garantiza que A->B se procesa siempre en orden causal deterministico.
-  const sorted = [...events].sort((a, b) => 
+  const sorted = uniqueEvents.sort((a, b) => 
     (a.logical_ts ?? 0) - (b.logical_ts ?? 0) || a.id.localeCompare(b.id)
   );
   for (const rawEvent of sorted) {
@@ -43,6 +57,7 @@ export function fold(
     if (verifySignature && rawEvent.authority > 40) {
       if (!verifySignature(rawEvent)) {
         event = { ...rawEvent, authority: 40 };
+        projection.degraded_events_count = (projection.degraded_events_count ?? 0) + 1;
       }
     }
     applyEvent(projection, event, policy);
@@ -129,24 +144,26 @@ function handleSingleValuedAssert(
   // Menor autoridad no puede voltear una decision de mayor autoridad, pero si el valor difiere,
   // se registra como DESAFIO (disputa) para no perder la señal en query_active_state
   if (event.authority < existing.authority) {
-    const disputeConflict: ConflictState = {
-      entity_key: event.entity_key,
-      conflicting_events: [
-        {
-          id: existing.source_event_id,
-          entity_key: existing.entity_key,
-          type: 'ASSERT',
-          slot_type: existing.slot_type,
-          value: existing.value,
-          authority: existing.authority,
-          created_at: existing.updated_at,
-        },
-        event,
-      ],
-      reason: `Desafío: el hecho activo (autoridad ${existing.authority}: '${existing.value}') fue disputado por inferencia de menor autoridad (${event.authority}: '${event.value}')`,
-      detected_at: event.created_at,
-    };
-    projection.conflicts.set(event.entity_key, disputeConflict);
+    if (projection.conflicts.size < MAX_OPEN_DISPUTES || projection.conflicts.has(event.entity_key)) {
+      const disputeConflict: ConflictState = {
+        entity_key: event.entity_key,
+        conflicting_events: [
+          {
+            id: existing.source_event_id,
+            entity_key: existing.entity_key,
+            type: 'ASSERT',
+            slot_type: existing.slot_type,
+            value: existing.value,
+            authority: existing.authority,
+            created_at: existing.updated_at,
+          },
+          event,
+        ],
+        reason: `Desafío: el hecho activo (autoridad ${existing.authority}: '${existing.value}') fue disputado por inferencia de menor autoridad (${event.authority}: '${event.value}')`,
+        detected_at: event.created_at,
+      };
+      projection.conflicts.set(event.entity_key, disputeConflict);
+    }
     return;
   }
 

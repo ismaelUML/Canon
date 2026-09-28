@@ -39,35 +39,52 @@ export class HybridEventStore implements EventStore {
     }
 
     this.db = new DatabaseSync(dbPath);
+    try {
+      this.db.exec(`PRAGMA busy_timeout = 5000;`);
+    } catch {}
     this.initCacheSchema();
     this.syncCache();
   }
 
   private initCacheSchema(): void {
-    this.db.exec(`
-      PRAGMA journal_mode = WAL;
-      CREATE TABLE IF NOT EXISTS cache_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS memory_events (
-        id TEXT PRIMARY KEY,
-        schema_version INTEGER NOT NULL DEFAULT 1,
-        entity_key TEXT NOT NULL,
-        logical_ts INTEGER NOT NULL,
-        event_type TEXT NOT NULL,
-        slot_type TEXT,
-        value TEXT NOT NULL,
-        authority INTEGER NOT NULL,
-        signature TEXT,
-        supersedes_event_id TEXT,
-        resolves_event_ids TEXT,
-        source_session_id TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_events_key ON memory_events(entity_key);
-      CREATE INDEX IF NOT EXISTS idx_events_ts ON memory_events(logical_ts);
-    `);
+    let retries = 5;
+    while (retries > 0) {
+      try {
+        this.db.exec(`
+          PRAGMA busy_timeout = 5000;
+          PRAGMA journal_mode = WAL;
+          CREATE TABLE IF NOT EXISTS cache_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS memory_events (
+            id TEXT PRIMARY KEY,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            entity_key TEXT NOT NULL,
+            logical_ts INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            slot_type TEXT,
+            value TEXT NOT NULL,
+            authority INTEGER NOT NULL,
+            signature TEXT,
+            supersedes_event_id TEXT,
+            resolves_event_ids TEXT,
+            source_session_id TEXT,
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_events_key ON memory_events(entity_key);
+          CREATE INDEX IF NOT EXISTS idx_events_ts ON memory_events(logical_ts);
+        `);
+        break;
+      } catch (err: any) {
+        if (err.message?.includes('locked') || err.message?.includes('busy')) {
+          retries--;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+          continue;
+        }
+        throw err;
+      }
+    }
 
     // Migraciones idempotentes si la tabla ya existia previamente en disco
     try {
@@ -101,7 +118,7 @@ export class HybridEventStore implements EventStore {
     this.db.exec(`DELETE FROM memory_events;`);
 
     const insertStmt = this.db.prepare(`
-      INSERT INTO memory_events (
+      INSERT OR REPLACE INTO memory_events (
         id, schema_version, entity_key, logical_ts, event_type, slot_type, value, authority,
         signature, supersedes_event_id, resolves_event_ids, source_session_id, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -110,7 +127,10 @@ export class HybridEventStore implements EventStore {
     for (const evt of events) {
       const slotType = evt.type === 'ASSERT' ? evt.slot_type : null;
       const value = evt.type === 'SUPERSEDE' ? evt.new_value : evt.type === 'RESOLVE_CONFLICT' ? evt.winning_value : evt.value;
-      const supersedesId = evt.type === 'SUPERSEDE' ? evt.supersedes_event_id : null;
+      const supersedesId =
+        evt.type === 'SUPERSEDE' || evt.type === 'ASSERT'
+          ? evt.supersedes_event_id ?? null
+          : null;
       const resolvesIds = evt.type === 'RESOLVE_CONFLICT' ? JSON.stringify(evt.resolves_event_ids) : null;
 
       // Candado de seguridad: si el evento afirma autoridad > 40 sin firma HMAC valida,
@@ -162,8 +182,10 @@ export class HybridEventStore implements EventStore {
   // Version para ser ejecutada dentro de withLock() evitando deadlocks por reentrancia
   appendUnlocked(event: MemoryEvent): void {
     const diskEvents = this.readEventsFromDisk();
-    const currentMaxTs = diskEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
-    event.logical_ts = currentMaxTs + 1;
+    if (!event.logical_ts || event.logical_ts === 0) {
+      const currentMaxTs = diskEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
+      event.logical_ts = currentMaxTs + 1;
+    }
     event.schema_version = event.schema_version ?? 1;
 
     // Escribir en texto plano en events.jsonl
@@ -255,6 +277,7 @@ export class HybridEventStore implements EventStore {
         type: 'ASSERT',
         slot_type: row.slot_type ?? 'SINGLE_VALUED',
         value: row.value,
+        supersedes_event_id: row.supersedes_event_id ?? undefined,
       };
     }
 
