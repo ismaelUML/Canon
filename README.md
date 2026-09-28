@@ -5,7 +5,7 @@
 
 ---
 
-## 🏛️ Arquitectura Hexagonal
+## Arquitectura Hexagonal
 
 ```
 scratch/canon/
@@ -45,7 +45,7 @@ scratch/canon/
 
 ---
 
-## 🚀 Principios Clave
+## Principios Clave
 
 1. **Supersesión Estructural por Cardinalidad:**
    - **Slots de valor único** (`SINGLE_VALUED`): `dep:tailwindcss:version`, `db:pk_format`. Una nueva aserción **es** una supersesión automática. Sin NLP.
@@ -67,7 +67,7 @@ scratch/canon/
 
 ---
 
-## 🧪 Ejecutar Tests y Staleness Benchmark
+## Ejecutar Tests y Staleness Benchmark
 
 ```bash
 npm test
@@ -77,7 +77,7 @@ Los 13 tests (incluyendo el benchmark de staleness) se ejecutan en **~200 ms**.
 
 ---
 
-## 🔌 Configuración en Antigravity IDE
+## Configuración en Antigravity IDE
 
 Para conectar Canon a Antigravity mediante MCP, agregá la siguiente entrada en tu archivo `mcp_config.json`:
 
