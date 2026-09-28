@@ -4,7 +4,8 @@
 // usando la clave HMAC que reside fuera del workspace.
 
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { resolveProjectRoot } from '../adapters/resolver/path_resolver.ts';
 import { HybridEventStore } from '../adapters/storage/hybrid_store.ts';
 import { Authority } from '../domain/models.ts';
@@ -42,117 +43,9 @@ export async function runCli(args: string[]): Promise<void> {
     process.exit(1);
   }
   const { canonDir, rootDir } = resolveProjectRoot(targetDir);
-  const store = new HybridEventStore(canonDir);
-
-  if (command === 'learn') {
-    // Valla interactiva: frena agentes headless sin terminal asignada
-    const isTTY = Boolean(process.stdin.isTTY || process.stdout.isTTY);
-    const isConfirmed = args.includes('--interactive-confirmed') || process.env.CANON_ALLOW_NON_TTY === '1';
-
-    if (!isTTY && !isConfirmed) {
-      console.error('❌ Error de seguridad: canon learn requiere un canal interactivo (TTY) para certificar USER_EXPLICIT.');
-      process.exit(1);
-    }
-
-    const key = args[3];
-    const val = args[4];
-
-    if (!key || !val) {
-      console.error('❌ Error: Se requiere <entity_key> y <value>.');
-      printHelp();
-      process.exit(1);
-    }
-
-    const slotIndex = args.indexOf('--slot');
-    const slotType: SlotCardinality =
-      slotIndex !== -1 && args[slotIndex + 1] === 'ACCUMULATIVE' ? 'ACCUMULATIVE' : 'SINGLE_VALUED';
-
-    const eventId = `evt_${randomUUID()}`;
-    const createdAt = new Date().toISOString();
-
-    const rawEvent: AssertEvent = {
-      id: eventId,
-      schema_version: 1,
-      entity_key: key,
-      logical_ts: 0,
-      slot_type: slotType,
-      value: val,
-      authority: Authority.USER_EXPLICIT, // 100
-      created_at: createdAt,
-      type: 'ASSERT',
-    };
-
-    await store.withLock(async () => {
-      const allEvents = await store.getAllEvents();
-      const maxTs = allEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
-      rawEvent.logical_ts = maxTs + 1;
-      rawEvent.signature = signEvent(rawEvent);
-      store.appendUnlocked(rawEvent);
-    });
-
-    console.log(`✅ [CANON LEARN] Hecho registrado con autoridad USER_EXPLICIT (100) en ${rootDir}`);
-    console.log(`   ID: ${eventId}`);
-    console.log(`   Clave: ${key} = ${val}`);
-    console.log(`   Firma HMAC: ${rawEvent.signature.slice(0, 16)}...`);
-    return;
-  }
-
-  if (command === 'resolve') {
-    const isTTY = Boolean(process.stdin.isTTY || process.stdout.isTTY);
-    const isConfirmed = args.includes('--interactive-confirmed') || process.env.CANON_ALLOW_NON_TTY === '1';
-
-    if (!isTTY && !isConfirmed) {
-      console.error('❌ Error de seguridad: canon resolve requiere confirmación humana interactiva (TTY).');
-      process.exit(1);
-    }
-
-    const key = args[3];
-    const winningVal = args[4];
-    const resolveIds = args.slice(5).filter((a) => !a.startsWith('--'));
-
-    if (!key || !winningVal || resolveIds.length === 0) {
-      console.error('❌ Error: Se requiere <entity_key> <winning_value> <resolves_event_id1> [id2...]');
-      process.exit(1);
-    }
-
-    const eventId = `res_${randomUUID()}`;
-    const createdAt = new Date().toISOString();
-
-    const resolveEvent = {
-      id: eventId,
-      schema_version: 1,
-      entity_key: key,
-      logical_ts: 0,
-      resolves_event_ids: resolveIds,
-      winning_value: winningVal,
-      authority: Authority.USER_EXPLICIT,
-      created_at: createdAt,
-      type: 'RESOLVE_CONFLICT' as const,
-      signature: '',
-    };
-
-    await store.withLock(async () => {
-      const allEvents = await store.getAllEvents();
-      const maxTs = allEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
-      resolveEvent.logical_ts = maxTs + 1;
-      resolveEvent.signature = signEvent(resolveEvent);
-      store.appendUnlocked(resolveEvent);
-    });
-
-    console.log(`✅ [CANON RESOLVE] Conflicto resuelto para '${key}'. Hecho ganador: '${winningVal}' (id: ${eventId})`);
-    return;
-  }
-
-  if (command === 'query') {
-    const anchor = args[3] && !args[3].startsWith('--') ? args[3] : undefined;
-    const queryCase = new QueryActiveStateUseCase(store);
-    const res = await queryCase.execute({ anchor });
-    console.log(`[Proyecto: ${rootDir}]`);
-    console.log(res.formattedContext);
-    return;
-  }
-
   if (command === 'register') {
+    // Para registrar namespaces solo tocamos canon_policy.yaml.
+    // Evitamos abrir SQLite aca para no dejar file handles colgados en Windows.
     const isTTY = Boolean(process.stdin.isTTY || process.stdout.isTTY);
     const isConfirmed = args.includes('--interactive-confirmed') || process.env.CANON_ALLOW_NON_TTY === '1';
 
@@ -190,9 +83,123 @@ export async function runCli(args: string[]): Promise<void> {
     return;
   }
 
-  console.error(`Comando desconocido: ${command}`);
-  printHelp();
-  process.exit(1);
+  const store = new HybridEventStore(canonDir);
+  try {
+    if (command === 'learn') {
+      // Valla interactiva: frena agentes headless sin terminal asignada
+      const isTTY = Boolean(process.stdin.isTTY || process.stdout.isTTY);
+      const isConfirmed = args.includes('--interactive-confirmed') || process.env.CANON_ALLOW_NON_TTY === '1';
+
+      if (!isTTY && !isConfirmed) {
+        console.error('❌ Error de seguridad: canon learn requiere un canal interactivo (TTY) para certificar USER_EXPLICIT.');
+        process.exit(1);
+      }
+
+      const key = args[3];
+      const val = args[4];
+
+      if (!key || !val) {
+        console.error('❌ Error: Se requiere <entity_key> y <value>.');
+        printHelp();
+        process.exit(1);
+      }
+
+      const slotIndex = args.indexOf('--slot');
+      const slotType: SlotCardinality =
+        slotIndex !== -1 && args[slotIndex + 1] === 'ACCUMULATIVE' ? 'ACCUMULATIVE' : 'SINGLE_VALUED';
+
+      const eventId = `evt_${randomUUID()}`;
+      const createdAt = new Date().toISOString();
+
+      const rawEvent: AssertEvent = {
+        id: eventId,
+        schema_version: 1,
+        entity_key: key,
+        logical_ts: 0,
+        slot_type: slotType,
+        value: val,
+        authority: Authority.USER_EXPLICIT, // 100
+        created_at: createdAt,
+        type: 'ASSERT',
+      };
+
+      await store.withLock(async () => {
+        const allEvents = await store.getAllEvents();
+        const maxTs = allEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
+        rawEvent.logical_ts = maxTs + 1;
+        rawEvent.signature = signEvent(rawEvent);
+        store.appendUnlocked(rawEvent);
+      });
+
+      console.log(`✅ [CANON LEARN] Hecho registrado con autoridad USER_EXPLICIT (100) en ${rootDir}`);
+      console.log(`   ID: ${eventId}`);
+      console.log(`   Clave: ${key} = ${val}`);
+      console.log(`   Firma HMAC: ${rawEvent.signature.slice(0, 16)}...`);
+      return;
+    }
+
+    if (command === 'resolve') {
+      const isTTY = Boolean(process.stdin.isTTY || process.stdout.isTTY);
+      const isConfirmed = args.includes('--interactive-confirmed') || process.env.CANON_ALLOW_NON_TTY === '1';
+
+      if (!isTTY && !isConfirmed) {
+        console.error('❌ Error de seguridad: canon resolve requiere confirmación humana interactiva (TTY).');
+        process.exit(1);
+      }
+
+      const key = args[3];
+      const winningVal = args[4];
+      const resolveIds = args.slice(5).filter((a) => !a.startsWith('--'));
+
+      if (!key || !winningVal || resolveIds.length === 0) {
+        console.error('❌ Error: Se requiere <entity_key> <winning_value> <resolves_event_id1> [id2...]');
+        process.exit(1);
+      }
+
+      const eventId = `res_${randomUUID()}`;
+      const createdAt = new Date().toISOString();
+
+      const resolveEvent = {
+        id: eventId,
+        schema_version: 1,
+        entity_key: key,
+        logical_ts: 0,
+        resolves_event_ids: resolveIds,
+        winning_value: winningVal,
+        authority: Authority.USER_EXPLICIT,
+        created_at: createdAt,
+        type: 'RESOLVE_CONFLICT' as const,
+        signature: '',
+      };
+
+      await store.withLock(async () => {
+        const allEvents = await store.getAllEvents();
+        const maxTs = allEvents.reduce((max, e) => Math.max(max, e.logical_ts ?? 0), 0);
+        resolveEvent.logical_ts = maxTs + 1;
+        resolveEvent.signature = signEvent(resolveEvent);
+        store.appendUnlocked(resolveEvent);
+      });
+
+      console.log(`✅ [CANON RESOLVE] Conflicto resuelto para '${key}'. Hecho ganador: '${winningVal}' (id: ${eventId})`);
+      return;
+    }
+
+    if (command === 'query') {
+      const anchor = args[3] && !args[3].startsWith('--') ? args[3] : undefined;
+      const queryCase = new QueryActiveStateUseCase(store);
+      const res = await queryCase.execute({ anchor });
+      console.log(`[Proyecto: ${rootDir}]`);
+      console.log(res.formattedContext);
+      return;
+    }
+
+    console.error(`Comando desconocido: ${command}`);
+    printHelp();
+    process.exit(1);
+  } finally {
+    // Cerramos SQLite explicitamente para liberar locks de archivos en Windows
+    store.close();
+  }
 }
 
 // Ejecucion CLI directa

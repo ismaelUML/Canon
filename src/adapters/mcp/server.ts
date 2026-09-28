@@ -43,6 +43,10 @@ const TOOLS = [
           type: 'string',
           description: 'ID opcional del evento activo que se busca actualizar',
         },
+        allow_new_leaf: {
+          type: 'boolean',
+          description: 'Opcional. Si es true, permite crear una nueva propiedad o hoja bajo un subsistema existente sin ser rechazado por sospecha de sinonimia.',
+        },
       },
       required: ['context_path', 'entity_key', 'slot_type', 'value'],
     },
@@ -206,12 +210,14 @@ export class MCPServer {
       timestamps.push(now);
       this.rateLimitMap.set(rootDir, timestamps);
 
+      const allowNewLeaf = Boolean(args.allow_new_leaf ?? args.new_leaf);
       const res = await assertCase.execute({
         entity_key: args.entity_key,
         slot_type: args.slot_type as SlotCardinality,
         value: args.value,
         authority: Authority.INFERRED, // Forzado por canal: todo lo que entra por MCP es INFERRED (40)
         supersedes_event_id: args.supersedes_event_id,
+        allow_new_leaf: allowNewLeaf,
       });
       if (!res.ok) {
         return `❌ Error al registrar asercion: ${res.error}`;

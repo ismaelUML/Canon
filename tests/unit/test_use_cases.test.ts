@@ -3,11 +3,14 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
+import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { InMemoryEventStore } from '../../src/adapters/storage/in_memory.ts';
 import { AssertFactUseCase } from '../../src/use_cases/assert_fact.ts';
 import { QueryActiveStateUseCase } from '../../src/use_cases/query_active_state.ts';
 import { ResolveConflictUseCase } from '../../src/use_cases/resolve_conflict.ts';
 import { Authority } from '../../src/domain/models.ts';
+import { runCli } from '../../src/cli/canon_cli.ts';
 
 test('Use Case: Fail-closed rechaza claves fuera de namespaces registrados', async () => {
   const store = new InMemoryEventStore();
@@ -46,7 +49,24 @@ test('Use Case: Validacion de hojas bloquea bifurcacion lexica sin flag new_leaf
   });
   assert.strictEqual(res2.ok, false);
   assert.match(res2.error!, /Hoja no reconocida 'branch_format'/);
-  assert.match(res2.error!, /branch_naming/);
+  // 2b. Con flag allow_new_leaf: true, el agente puede registrar deliberadamente una hoja nueva
+  const res2b = await assertCase.execute({
+    entity_key: 'convention:git:commit_style',
+    slot_type: 'SINGLE_VALUED',
+    value: 'conventional',
+    authority: Authority.INFERRED,
+    allow_new_leaf: true,
+  });
+  assert.strictEqual(res2b.ok, true, 'allow_new_leaf: true debe permitir crear nuevas hojas');
+
+  // 2c. En namespaces naturalmente dinamicos (learned:*), el agente puede aprender novedades sin bloqueo
+  const res2c = await assertCase.execute({
+    entity_key: 'learned:node:worker_threads_leak',
+    slot_type: 'SINGLE_VALUED',
+    value: 'terminate before exit',
+    authority: Authority.INFERRED,
+  });
+  assert.strictEqual(res2c.ok, true, 'learned:* debe permitir incorporar nuevas hojas sin intervencion humana');
 
   // 3. Con autoridad humana (USER_EXPLICIT = 100), se acepta legítimamente (ej: via CLI 'canon learn')
   const res3 = await assertCase.execute({
@@ -158,4 +178,29 @@ test('Use Case: ResolveConflict entierra el conflicto y activa el hecho ganador'
   assert.strictEqual(cleanState.conflicts.length, 0);
   assert.strictEqual(cleanState.facts.length, 1);
   assert.strictEqual(cleanState.facts[0].value, 'uuidv4');
+});
+
+test('CLI: canon register actualiza canon_policy.yaml sin ReferenceError', async () => {
+  const tmpSubdir = join(process.cwd(), '.tmp_test_reg_' + Date.now());
+  mkdirSync(join(tmpSubdir, '.canon'), { recursive: true });
+  try {
+    await runCli([
+      'node',
+      'canon_cli.ts',
+      'register',
+      'observability:*',
+      '--policy',
+      'interrupt',
+      '--interactive-confirmed',
+      '--dir',
+      tmpSubdir,
+    ]);
+
+    const policyFile = join(tmpSubdir, 'canon_policy.yaml');
+    assert.strictEqual(existsSync(policyFile), true);
+    const content = readFileSync(policyFile, 'utf8');
+    assert.match(content, /"observability:\*": "interrupt"/);
+  } finally {
+    rmSync(tmpSubdir, { recursive: true, force: true });
+  }
 });

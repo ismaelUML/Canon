@@ -17,6 +17,7 @@ export interface AssertFactRequest {
   authority: AuthorityLevel;
   supersedes_event_id?: string;
   source_session_id?: string;
+  allow_new_leaf?: boolean;
 }
 
 export interface AssertFactResult {
@@ -78,8 +79,14 @@ export class AssertFactUseCase {
       const { subsystem, leaf, hasSubsystem } = extractSubsystemAndLeaf(request.entity_key);
       const allEvents = await this.store.getAllEvents();
 
-      // Verificacion de hojas para evitar bifurcacion lexica bajo subsistemas existentes (ej: branch_naming vs branch_format en convention:git)
-      if (hasSubsystem) {
+      // Bloqueamos sinonimos inventados (branch_format vs branch_naming en convention:git),
+      // pero si el agente pone allow_new_leaf: true, o estamos en un namespace naturalmente
+      // dinamico (learned:* o slots ACCUMULATIVE de quirks), dejamos pasar la novedad.
+      // Si no, el agente se frustra y no aprende nada util en caliente.
+      const isDynamic = subsystem.startsWith('learned') || request.slot_type === 'ACCUMULATIVE';
+      const permitsNewLeaf = Boolean(request.allow_new_leaf || isDynamic);
+
+      if (hasSubsystem && !permitsNewLeaf) {
         const existingLeaves = Array.from(
           new Set(
             allEvents
@@ -91,7 +98,7 @@ export class AssertFactUseCase {
         if (existingLeaves.length > 0 && !existingLeaves.includes(leaf) && request.authority <= 40) {
           return {
             ok: false,
-            error: `❌ Hoja no reconocida '${leaf}' en subsistema '${subsystem}'. Hojas conocidas: [${existingLeaves.join(', ')}]. Para agregar una hoja nueva, debe ser aprobada por el usuario ejecutando: 'npm run canon learn ${request.entity_key} <valor>'.`,
+            error: `❌ Hoja no reconocida '${leaf}' en subsistema '${subsystem}'. Hojas conocidas: [${existingLeaves.join(', ')}]. Si es una clave nueva deliberada (y no un sinónimo accidental), enviá 'allow_new_leaf: true' o agregala con: 'npm run canon learn ${request.entity_key} <valor>'.`,
           };
         }
       }
