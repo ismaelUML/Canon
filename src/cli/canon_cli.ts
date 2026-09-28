@@ -35,9 +35,10 @@ export async function runCli(args: string[]): Promise<void> {
 
   const dirIndex = args.indexOf('--dir');
   const rawTargetDir = dirIndex !== -1 && args[dirIndex + 1] ? args[dirIndex + 1] : process.cwd();
-  const targetDir = resolve(rawTargetDir);
-  if (targetDir.includes('\0')) {
-    console.error('❌ Error de seguridad: Ruta contiene caracteres inválidos.');
+  const baseCwd = resolve(process.cwd());
+  const targetDir = resolve(baseCwd, rawTargetDir);
+  if (targetDir.includes('\0') || !targetDir.startsWith(baseCwd)) {
+    console.error('❌ Error de seguridad: La ruta del proyecto debe residir dentro del directorio de trabajo actual.');
     process.exit(1);
   }
   const { canonDir, rootDir } = resolveProjectRoot(targetDir);

@@ -13,7 +13,7 @@ import {
   rmdirSync,
   statSync,
 } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { join, resolve, basename, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { MemoryEvent, ConflictState } from '../../domain/models.ts';
@@ -42,10 +42,17 @@ export class HybridEventStore implements EventStore {
   private db: DatabaseSync;
 
   constructor(canonDir: string) {
-    const safeCanonDir = resolve(canonDir);
-    if (safeCanonDir.includes('\0')) {
-      throw new Error('Path traversal: null byte detected');
+    const rawDir = resolve(canonDir);
+    if (rawDir.includes('\0')) {
+      throw new Error('Path traversal: null byte detected in directory path');
     }
+    const parentDir = dirname(rawDir);
+    const dirName = basename(rawDir);
+    const safeCanonDir = assertSafeChildPath(parentDir, dirName);
+    if (!safeCanonDir.startsWith(parentDir) || basename(safeCanonDir) !== dirName) {
+      throw new Error('Path traversal: invalid directory path');
+    }
+
     this.canonDir = safeCanonDir;
     this.jsonlPath = assertSafeChildPath(safeCanonDir, 'events.jsonl');
     this.lockPath = assertSafeChildPath(safeCanonDir, 'events.jsonl.lock');
