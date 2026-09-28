@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { SQLiteEventStore } from '../../src/adapters/storage/sqlite_store.ts';
+import { HybridEventStore, assertSafeChildPath } from '../../src/adapters/storage/hybrid_store.ts';
 import { validateAssertionSecurity } from '../../src/domain/security.ts';
 import { fold } from '../../src/domain/fold.ts';
 import { Authority } from '../../src/domain/models.ts';
@@ -66,4 +67,18 @@ test('SQLite Store: Persistencia y reconstruccion de proyeccion exacta', async (
   assert.ok(projection.superseded_event_ids.has('evt_sql_1'));
 
   store.close();
+});
+
+test('Seguridad: assertSafeChildPath y HybridStore rechazan intentos de path traversal y null bytes', () => {
+  assert.throws(() => {
+    assertSafeChildPath('C:\\some\\project\\.canon', '../secrets/events.jsonl');
+  }, /Path traversal/);
+
+  assert.throws(() => {
+    assertSafeChildPath('C:\\some\\project\\.canon\0malicious', 'events.jsonl');
+  }, /Path traversal/);
+
+  assert.throws(() => {
+    new HybridEventStore('C:\\some\\project\\.canon\0malicious');
+  }, /Path traversal/);
 });

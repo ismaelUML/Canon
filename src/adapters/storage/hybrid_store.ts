@@ -13,7 +13,7 @@ import {
   rmdirSync,
   statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { MemoryEvent, ConflictState } from '../../domain/models.ts';
@@ -22,6 +22,19 @@ import { fold } from '../../domain/fold.ts';
 import { DEFAULT_POLICY_CONFIG } from '../../domain/policy.ts';
 import { verifyEventSignature } from '../crypto/signer.ts';
 
+// Sanitizador defensivo contra Path Traversal y Connection String Injection
+export function assertSafeChildPath(baseDir: string, expectedFileName: string): string {
+  const safeBase = resolve(baseDir);
+  if (safeBase.includes('\0')) {
+    throw new Error('Path traversal: null byte detected in base directory');
+  }
+  const safeChild = resolve(safeBase, expectedFileName);
+  if (!safeChild.startsWith(safeBase) || basename(safeChild) !== expectedFileName) {
+    throw new Error(`Path traversal: child path escapes base directory: ${expectedFileName}`);
+  }
+  return safeChild;
+}
+
 export class HybridEventStore implements EventStore {
   private canonDir: string;
   private jsonlPath: string;
@@ -29,13 +42,17 @@ export class HybridEventStore implements EventStore {
   private db: DatabaseSync;
 
   constructor(canonDir: string) {
-    this.canonDir = canonDir;
-    this.jsonlPath = join(canonDir, 'events.jsonl');
-    this.lockPath = join(canonDir, 'events.jsonl.lock');
-    const dbPath = join(canonDir, 'cache.db');
+    const safeCanonDir = resolve(canonDir);
+    if (safeCanonDir.includes('\0')) {
+      throw new Error('Path traversal: null byte detected');
+    }
+    this.canonDir = safeCanonDir;
+    this.jsonlPath = assertSafeChildPath(safeCanonDir, 'events.jsonl');
+    this.lockPath = assertSafeChildPath(safeCanonDir, 'events.jsonl.lock');
+    const dbPath = assertSafeChildPath(safeCanonDir, 'cache.db');
 
-    if (!existsSync(canonDir)) {
-      mkdirSync(canonDir, { recursive: true });
+    if (!existsSync(safeCanonDir)) {
+      mkdirSync(safeCanonDir, { recursive: true });
     }
 
     this.db = new DatabaseSync(dbPath);
@@ -97,11 +114,12 @@ export class HybridEventStore implements EventStore {
 
   // Sincroniza la cache SQLite con el JSONL validando el hash SHA-256 del archivo
   syncCache(): { reloaded: boolean; conflicts: ConflictState[] } {
-    if (!existsSync(this.jsonlPath)) {
+    const safeJsonlPath = assertSafeChildPath(this.canonDir, 'events.jsonl');
+    if (!existsSync(safeJsonlPath)) {
       return { reloaded: false, conflicts: [] };
     }
 
-    const fileContent = readFileSync(this.jsonlPath);
+    const fileContent = readFileSync(safeJsonlPath);
     const currentHash = createHash('sha256').update(fileContent).digest('hex');
 
     const metaStmt = this.db.prepare(`SELECT value FROM cache_meta WHERE key = 'source_sha256'`);
@@ -189,8 +207,9 @@ export class HybridEventStore implements EventStore {
     event.schema_version = event.schema_version ?? 1;
 
     // Escribir en texto plano en events.jsonl
+    const safeJsonlPath = assertSafeChildPath(this.canonDir, 'events.jsonl');
     const line = JSON.stringify(event) + '\n';
-    appendFileSync(this.jsonlPath, line, 'utf8');
+    appendFileSync(safeJsonlPath, line, 'utf8');
 
     // Actualizar cache local
     this.syncCache();
@@ -225,19 +244,21 @@ export class HybridEventStore implements EventStore {
   }
 
   private readEventsFromDisk(): MemoryEvent[] {
-    if (!existsSync(this.jsonlPath)) return [];
-    const content = readFileSync(this.jsonlPath, 'utf8');
+    const safeJsonlPath = assertSafeChildPath(this.canonDir, 'events.jsonl');
+    if (!existsSync(safeJsonlPath)) return [];
+    const content = readFileSync(safeJsonlPath, 'utf8');
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
     return lines.map((l) => JSON.parse(l));
   }
 
   private async acquireLock(maxRetries: number = 20, delayMs: number = 25): Promise<() => void> {
+    const safeLockPath = assertSafeChildPath(this.canonDir, 'events.jsonl.lock');
     for (let i = 0; i < maxRetries; i++) {
       try {
-        mkdirSync(this.lockPath); // Operacion atomica en el filesystem
+        mkdirSync(safeLockPath); // Operacion atomica en el filesystem
         return () => {
           try {
-            rmdirSync(this.lockPath);
+            rmdirSync(safeLockPath);
           } catch {
             // Ignorado si ya se libero
           }
@@ -245,9 +266,9 @@ export class HybridEventStore implements EventStore {
       } catch (err: any) {
         // Chequeo de lock colgado/huerfano (mas de 5 segundos de antiguedad)
         try {
-          const s = statSync(this.lockPath);
+          const s = statSync(safeLockPath);
           if (Date.now() - s.mtimeMs > 5000) {
-            rmdirSync(this.lockPath);
+            rmdirSync(safeLockPath);
             continue;
           }
         } catch {
@@ -256,7 +277,7 @@ export class HybridEventStore implements EventStore {
         await new Promise((res) => setTimeout(res, delayMs + (i % 5) * 5));
       }
     }
-    throw new Error(`Timeout al adquirir lock en ${this.lockPath}`);
+    throw new Error(`Timeout al adquirir lock en ${safeLockPath}`);
   }
 
   private mapRowToEvent(row: any): MemoryEvent {

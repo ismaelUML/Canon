@@ -4,6 +4,7 @@
 // usando la clave HMAC que reside fuera del workspace.
 
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { resolveProjectRoot } from '../adapters/resolver/path_resolver.ts';
 import { HybridEventStore } from '../adapters/storage/hybrid_store.ts';
 import { Authority } from '../domain/models.ts';
@@ -33,7 +34,12 @@ export async function runCli(args: string[]): Promise<void> {
   }
 
   const dirIndex = args.indexOf('--dir');
-  const targetDir = dirIndex !== -1 && args[dirIndex + 1] ? args[dirIndex + 1] : process.cwd();
+  const rawTargetDir = dirIndex !== -1 && args[dirIndex + 1] ? args[dirIndex + 1] : process.cwd();
+  const targetDir = resolve(rawTargetDir);
+  if (targetDir.includes('\0')) {
+    console.error('❌ Error de seguridad: Ruta contiene caracteres inválidos.');
+    process.exit(1);
+  }
   const { canonDir, rootDir } = resolveProjectRoot(targetDir);
   const store = new HybridEventStore(canonDir);
 

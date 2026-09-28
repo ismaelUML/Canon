@@ -4,6 +4,7 @@
 // Expone canon_assert_fact, canon_query_active, canon_resolve_conflict y canon_audit_repo.
 
 import { createInterface } from 'node:readline';
+import { resolve } from 'node:path';
 import { resolveProjectRoot } from '../resolver/path_resolver.ts';
 import { HybridEventStore } from '../storage/hybrid_store.ts';
 import { AssertFactUseCase } from '../../use_cases/assert_fact.ts';
@@ -99,7 +100,11 @@ export class MCPServer {
     if (this.customStore) {
       return { store: this.customStore, rootDir: ':memory:' };
     }
-    const targetPath = contextPath ?? process.cwd();
+    const rawTargetPath = contextPath ?? process.cwd();
+    const targetPath = resolve(rawTargetPath);
+    if (targetPath.includes('\0')) {
+      throw new Error('Path traversal detected: invalid path');
+    }
     const resolved = resolveProjectRoot(targetPath);
     let store = this.stores.get(resolved.canonDir);
     if (!store) {

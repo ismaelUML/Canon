@@ -1,15 +1,22 @@
 // tests/helpers/concurrency_worker.ts
 // Worker de proceso separado para pruebas reales de concurrencia e inter-process locks.
 
+import { resolve } from 'node:path';
 import { HybridEventStore } from '../../src/adapters/storage/hybrid_store.ts';
 import { Authority } from '../../src/domain/models.ts';
 import type { AssertEvent } from '../../src/domain/models.ts';
 
-const canonDir = process.argv[2];
+const rawCanonDir = process.argv[2];
 const prefix = process.argv[3];
-const count = parseInt(process.argv[4] ?? '5', 10);
+const count = Number.parseInt(process.argv[4] ?? '5', 10);
 
-if (!canonDir || !prefix) {
+if (!rawCanonDir || !prefix || Number.isNaN(count)) {
+  process.exit(1);
+}
+
+// Sanitizar y validar ruta contra Path Traversal
+const canonDir = resolve(rawCanonDir);
+if (canonDir.includes('\0') || !canonDir.endsWith('.canon')) {
   process.exit(1);
 }
 

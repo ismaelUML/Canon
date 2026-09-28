@@ -22,7 +22,11 @@ export interface ResolvedProject {
 }
 
 export function resolveProjectRoot(startPath: string): ResolvedProject {
-  let currentDir = resolve(startPath);
+  const safeStart = resolve(startPath);
+  if (safeStart.includes('\0')) {
+    throw new Error('Path traversal detected: null byte in path');
+  }
+  let currentDir = safeStart;
   try {
     if (existsSync(currentDir) && !statSync(currentDir).isDirectory()) {
       currentDir = dirname(currentDir);
@@ -35,7 +39,7 @@ export function resolveProjectRoot(startPath: string): ResolvedProject {
 
   while (true) {
     // 1. Si esta carpeta ya tiene su propio .canon/, esa es su raiz indiscutible
-    const canonPath = join(currentDir, '.canon');
+    const canonPath = resolve(currentDir, '.canon');
     if (existsSync(canonPath)) {
       return { rootDir: currentDir, canonDir: canonPath };
     }
@@ -54,16 +58,15 @@ export function resolveProjectRoot(startPath: string): ResolvedProject {
     const gitPath = join(currentDir, '.git');
     if (existsSync(gitPath)) {
       const chosenRoot = candidateBoundary ?? currentDir;
-      return { rootDir: chosenRoot, canonDir: join(chosenRoot, '.canon') };
+      return { rootDir: chosenRoot, canonDir: resolve(chosenRoot, '.canon') };
     }
 
     const parentDir = dirname(currentDir);
     // Llegamos a la raiz del filesystem (C:\ o /) sin cruzar .git/
     if (parentDir === currentDir) {
       const chosenRoot = candidateBoundary ?? currentDir;
-      return { rootDir: chosenRoot, canonDir: join(chosenRoot, '.canon') };
+      return { rootDir: chosenRoot, canonDir: resolve(chosenRoot, '.canon') };
     }
-
     currentDir = parentDir;
   }
 }
