@@ -7,12 +7,11 @@ import assert from 'node:assert';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HybridEventStore } from '../../src/adapters/storage/hybrid_store.ts';
-import { signEvent } from '../../src/adapters/crypto/signer.ts';
-import { Authority } from '../../src/domain/models.ts';
-import type { AssertEvent } from '../../src/domain/models.ts';
-import { fold } from '../../src/domain/fold.ts';
-import { verifyEventSignature } from '../../src/adapters/crypto/signer.ts';
+import { HybridEventStore } from '../../packages/canon_infrastructure/src/storage/hybrid_store.ts';
+import { signEvent, verifyEventSignature } from '../../packages/canon_infrastructure/src/crypto/signer.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import type { AssertEvent } from '../../packages/canon_domain/src/models.ts';
+import { fold } from '../../packages/canon_domain/src/fold.ts';
 
 test('Seguridad HMAC: Linea pegada a mano en events.jsonl con autoridad 100 sin firma se degrada a 40', async () => {
   const tmpCanonDir = mkdtempSync(join(tmpdir(), 'canon-test-tamper-'));

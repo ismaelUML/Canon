@@ -6,11 +6,11 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InMemoryEventStore } from '../../src/adapters/storage/in_memory.ts';
-import { RepoOracle } from '../../src/adapters/oracle/repo_oracle.ts';
-import { fold } from '../../src/domain/fold.ts';
-import { Authority } from '../../src/domain/models.ts';
-import type { AssertEvent } from '../../src/domain/models.ts';
+import { InMemoryEventStore } from '../../packages/canon_infrastructure/src/storage/in_memory.ts';
+import { RepoOracle } from '../../packages/canon_application/src/oracle/repo_oracle.ts';
+import { fold } from '../../packages/canon_domain/src/fold.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import type { AssertEvent } from '../../packages/canon_domain/src/models.ts';
 
 test('RepoOracle: Detecta version desactualizada en memoria y emite supersesion automatica', async () => {
   const store = new InMemoryEventStore();

@@ -5,12 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { InMemoryEventStore } from '../../src/adapters/storage/in_memory.ts';
-import { AssertFactUseCase } from '../../src/use_cases/assert_fact.ts';
-import { QueryActiveStateUseCase } from '../../src/use_cases/query_active_state.ts';
-import { ResolveConflictUseCase } from '../../src/use_cases/resolve_conflict.ts';
-import { Authority } from '../../src/domain/models.ts';
-import { runCli } from '../../src/cli/canon_cli.ts';
+import { InMemoryEventStore } from '../../packages/canon_infrastructure/src/storage/in_memory.ts';
+import { AssertFactUseCase } from '../../packages/canon_application/src/use_cases/assert_fact.ts';
+import { QueryActiveStateUseCase } from '../../packages/canon_application/src/use_cases/query_active_state.ts';
+import { ResolveConflictUseCase } from '../../packages/canon_application/src/use_cases/resolve_conflict.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import { runCli } from '../../packages/canon_presentation/src/cli/canon_cli.ts';
 
 test('Use Case: Fail-closed rechaza claves fuera de namespaces registrados', async () => {
   const store = new InMemoryEventStore();

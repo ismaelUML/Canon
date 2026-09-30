@@ -3,11 +3,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
-import { MCPServer } from '../../src/adapters/mcp/server.ts';
-import { Authority } from '../../src/domain/models.ts';
-import type { AssertEvent } from '../../src/domain/models.ts';
-import { signEvent } from '../../src/adapters/crypto/signer.ts';
-import { fold } from '../../src/domain/fold.ts';
+import { MCPServer } from '../../packages/canon_presentation/src/mcp/server.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import type { AssertEvent } from '../../packages/canon_domain/src/models.ts';
+import { signEvent } from '../../packages/canon_infrastructure/src/crypto/signer.ts';
+import { fold } from '../../packages/canon_domain/src/fold.ts';
 
 test('MCP Server: Handshake initialize y tools/list cumplen con JSON-RPC 2.0', async () => {
   const server = new MCPServer(':memory:');

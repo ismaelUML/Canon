@@ -206,7 +206,7 @@ export function runComplexityAudit(targetDirs: string[]): boolean {
 
 if (process.argv[1] && process.argv[1].endsWith('check_complexity.ts')) {
   const dirs = process.argv.slice(2);
-  const targetDirs = dirs.length > 0 ? dirs : ['packages', 'src'];
+  const targetDirs = dirs.length > 0 ? dirs : ['packages'];
   const passed = runComplexityAudit(targetDirs);
   if (!passed) {
     process.exit(1);

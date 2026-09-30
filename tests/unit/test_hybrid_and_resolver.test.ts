@@ -7,11 +7,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fork } from 'node:child_process';
-import { resolveProjectRoot } from '../../src/adapters/resolver/path_resolver.ts';
-import { HybridEventStore } from '../../src/adapters/storage/hybrid_store.ts';
-import { fold } from '../../src/domain/fold.ts';
-import { Authority } from '../../src/domain/models.ts';
-import type { AssertEvent, SupersedeEvent } from '../../src/domain/models.ts';
+import { resolveProjectRoot } from '../../packages/canon_application/src/resolver/path_resolver.ts';
+import { HybridEventStore } from '../../packages/canon_infrastructure/src/storage/hybrid_store.ts';
+import { fold } from '../../packages/canon_domain/src/fold.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import type { AssertEvent, SupersedeEvent } from '../../packages/canon_domain/src/models.ts';
 
 test('PathResolver: Aisla subproyectos en monorepos y frena en techo duro .git', () => {
   const root = mkdtempSync(join(tmpdir(), 'canon-resolver-test-'));

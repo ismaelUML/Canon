@@ -3,12 +3,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
-import { SQLiteEventStore } from '../../src/adapters/storage/sqlite_store.ts';
-import { HybridEventStore, assertSafeChildPath } from '../../src/adapters/storage/hybrid_store.ts';
-import { validateAssertionSecurity } from '../../src/domain/security.ts';
-import { fold } from '../../src/domain/fold.ts';
-import { Authority } from '../../src/domain/models.ts';
-import type { AssertEvent, SupersedeEvent, ResolveConflictEvent } from '../../src/domain/models.ts';
+import { SQLiteEventStore } from '../../packages/canon_infrastructure/src/storage/sqlite_store.ts';
+import { HybridEventStore, assertSafeChildPath } from '../../packages/canon_infrastructure/src/storage/hybrid_store.ts';
+import { validateAssertionSecurity } from '../../packages/canon_domain/src/security.ts';
+import { fold } from '../../packages/canon_domain/src/fold.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import type { AssertEvent, SupersedeEvent, ResolveConflictEvent } from '../../packages/canon_domain/src/models.ts';
 
 test('Seguridad: Rechaza credenciales y secretos en aserciones', () => {
   const bad1 = validateAssertionSecurity('Use api key sk-12345678901234567890 for auth');

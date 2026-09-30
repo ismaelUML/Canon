@@ -6,11 +6,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
-import { InMemoryEventStore } from '../../src/adapters/storage/in_memory.ts';
-import { fold } from '../../src/domain/fold.ts';
-import { Authority } from '../../src/domain/models.ts';
-import type { AssertEvent, ResolveConflictEvent } from '../../src/domain/models.ts';
-import { DEFAULT_POLICY_CONFIG } from '../../src/domain/policy.ts';
+import { InMemoryEventStore } from '../../packages/canon_infrastructure/src/storage/in_memory.ts';
+import { fold } from '../../packages/canon_domain/src/fold.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import type { AssertEvent, ResolveConflictEvent } from '../../packages/canon_domain/src/models.ts';
+import { DEFAULT_POLICY_CONFIG } from '../../packages/canon_domain/src/policy.ts';
 
 test('Benchmark 1: Supersesion limpia en slot unico (Vitest mata a Jest)', async () => {
   const store = new InMemoryEventStore();

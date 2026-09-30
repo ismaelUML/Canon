@@ -2,9 +2,9 @@
 // Worker de proceso separado para pruebas reales de concurrencia e inter-process locks.
 
 import { resolve, dirname, basename } from 'node:path';
-import { HybridEventStore } from '../../src/adapters/storage/hybrid_store.ts';
-import { Authority } from '../../src/domain/models.ts';
-import type { AssertEvent } from '../../src/domain/models.ts';
+import { HybridEventStore } from '../../packages/canon_infrastructure/src/storage/hybrid_store.ts';
+import { Authority } from '../../packages/canon_domain/src/models.ts';
+import type { AssertEvent } from '../../packages/canon_domain/src/models.ts';
 
 const rawCanonDir = process.argv[2];
 const prefix = process.argv[3];
