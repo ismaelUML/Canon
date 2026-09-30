@@ -1,14 +1,14 @@
-name: CI Pipeline
+name: CI & SonarCloud Quality Gate
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "main", "master", "develop" ]
   pull_request:
-    branches: [ main, master ]
+    types: [ opened, synchronize, reopened ]
 
 jobs:
-  test:
-    name: Test & Staleness Benchmark
+  build-test-analyze:
+    name: Build, Test, Complexity & SonarCloud Quality Gate
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -18,14 +18,41 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Desactiva shallow clone para analisis historico preciso de SonarCloud
 
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
 
+      - name: 🛡️ Verify Architectural Rules & Cyclomatic Complexity (CC <= 5, MI >= 75)
+        run: npm run lint:complexity
+
+      - name: 📐 Verify Package Structural Metrics (Robert C. Martin D < 0.70)
+        run: npm run audit:metrics
+
+      - name: 💰 Run SQALE Financial Technical Debt Audit (Capers Jones F(MI))
+        run: npm run audit:sqale
+
       - name: 🛡️ Run Test #1: Staleness Benchmark (Obsolescence & Conflict Detection)
         run: npm run test:staleness
 
-      - name: 🧪 Run Test #2: Unit & Integration Tests (SQLite, Security, Oracle, MCP)
-        run: npm run test:unit
+      - name: 🧪 Run Test #2: Unit & Integration Tests with Coverage Report (LCOV)
+        run: npm run test:coverage
+
+      - name: ☁️ SonarCloud Scan
+        if: matrix.os == 'ubuntu-latest' && env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: 🏆 SonarCloud Quality Gate Verification
+        if: matrix.os == 'ubuntu-latest' && env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          scanMetadataReportFile: .scannerwork/report-task.txt

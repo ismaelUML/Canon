@@ -7,4 +7,6 @@ dist/
 .canon/*.db-wal
 .canon/*.db-shm
 .canon/*.lock
+coverage/
+.scannerwork/
 .DS_Store
