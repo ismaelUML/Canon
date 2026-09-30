@@ -1,0 +1,11 @@
+{
+  "name": "@canon/application",
+  "version": "0.1.0",
+  "description": "Canon Application Layer: Use Cases, Repo Oracle, and Path Resolvers",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@canon/domain": "file:../canon_domain"
+  }
+}

@@ -1,12 +1,21 @@
 {
-  "name": "canon-memory",
+  "name": "canon-workspace",
   "version": "0.1.0",
-  "description": "Deterministic Truth-Maintenance Memory Engine for AI Coding Agents",
+  "description": "Deterministic Truth-Maintenance Memory Engine for AI Coding Agents (Hexagonal Modular Architecture)",
   "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "node --experimental-strip-types --test tests/benchmark/*.test.ts tests/unit/*.test.ts",
     "test:staleness": "node --experimental-strip-types --test tests/benchmark/*.test.ts",
     "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts",
+    "test:coverage": "node -e \"require('node:fs').mkdirSync('coverage',{recursive:true})\" && node --experimental-strip-types --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info tests/benchmark/*.test.ts tests/unit/*.test.ts",
+    "lint:complexity": "node --experimental-strip-types scripts/check_complexity.ts packages src",
+    "audit:metrics": "node --experimental-strip-types scripts/audit_metrics.ts",
+    "audit:sqale": "node --experimental-strip-types scripts/sqale_audit.ts",
+    "audit": "npm run lint:complexity && npm run audit:metrics && npm run audit:sqale",
     "canon": "node --experimental-strip-types src/cli/canon_cli.ts"
   },
   "keywords": [
@@ -14,7 +23,9 @@
     "mcp",
     "event-sourcing",
     "memory",
-    "truth-maintenance"
+    "truth-maintenance",
+    "hexagonal-architecture",
+    "sonarcloud"
   ],
   "author": "",
   "license": "MIT"

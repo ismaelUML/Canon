@@ -1,0 +1,12 @@
+{
+  "name": "@canon/infrastructure",
+  "version": "0.1.0",
+  "description": "Canon Infrastructure Layer (Driven Adapters): SQLite, HybridStore, Crypto Signer, CircuitBreaker",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@canon/domain": "file:../canon_domain",
+    "@canon/application": "file:../canon_application"
+  }
+}

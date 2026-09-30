@@ -1,0 +1,9 @@
+{
+  "name": "@canon/domain",
+  "version": "0.1.0",
+  "description": "Canon Pure Domain Layer (Hexagonal Core): 0 dependencies, 0 I/O",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": "./src/index.ts",
+  "scripts": {}
+}
