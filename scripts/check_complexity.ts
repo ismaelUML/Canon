@@ -47,7 +47,7 @@ export function calculateCyclomaticComplexity(functionCode: string): number {
   const catchMatches = sanitized.match(/\bcatch\b/g);
   if (catchMatches) branches += catchMatches.length;
 
-  const caseMatches = sanitized.match(/\bcase\s+[^\r\n:]+:/g);
+  const caseMatches = sanitized.match(/\bcase\b/g);
   if (caseMatches) branches += caseMatches.length;
 
   // Operadores logicos
@@ -70,58 +70,94 @@ export function calculateMI(loc: number, cc: number): number {
   return Math.max(0, Math.min(100, Math.round(rawMi * 100) / 100));
 }
 
+const RESERVED_WORDS = new Set(['if', 'for', 'while', 'switch', 'catch']);
+
+export function isCommentLine(trimmed: string): boolean {
+  return trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*');
+}
+
+export function detectMethodOnLine(trimmed: string): string | null {
+  const method = trimmed.match(/^(?:public\s+|private\s+|protected\s+|static\s+|async\s+)*([a-zA-Z0-9_$]+)\s*\(/);
+  if (!method) return null;
+  return RESERVED_WORDS.has(method[1]) ? null : method[1];
+}
+
+export function detectFunctionOnLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (isCommentLine(trimmed)) return null;
+
+  const fn = trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_$]+)/);
+  if (fn) return fn[1];
+
+  const arrow = trimmed.match(/^(?:export\s+)?const\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(/);
+  if (arrow) return arrow[1];
+
+  return detectMethodOnLine(trimmed);
+}
+
+export function findMatchingCloseBrace(content: string, openBraceIndex: number): number {
+  let depth = 1;
+  let curr = openBraceIndex + 1;
+  while (curr < content.length && depth > 0) {
+    const char = content[curr];
+    if (char === '{') depth++;
+    else if (char === '}') depth--;
+    curr++;
+  }
+  return depth === 0 ? curr : -1;
+}
+
+export function extractFunctionMetric(
+  content: string,
+  startIndex: number,
+  funcName: string,
+  line: number
+): FunctionMetric | null {
+  const openBrace = content.indexOf('{', startIndex);
+  if (openBrace === -1 || openBrace - startIndex > 300) return null;
+
+  const closeBrace = findMatchingCloseBrace(content, openBrace);
+  if (closeBrace === -1) return null;
+
+  const body = content.substring(openBrace, closeBrace);
+  return {
+    name: funcName,
+    line,
+    cc: calculateCyclomaticComplexity(body),
+    loc: body.split('\n').length,
+  };
+}
+
+export function computeMaxAndAvgCc(functions: FunctionMetric[]): { maxCc: number; avgCc: number } {
+  if (functions.length === 0) return { maxCc: 1, avgCc: 1 };
+  const maxCc = functions.reduce((max, f) => Math.max(max, f.cc), 0);
+  const total = functions.reduce((s, f) => s + f.cc, 0);
+  const avgCc = Math.round((total / functions.length) * 10) / 10;
+  return { maxCc, avgCc };
+}
+
 export function analyzeFile(filePath: string): FileReport {
   const content = readFileSync(filePath, 'utf8');
   const lines = content.split('\n');
   const logicalLoc = lines.filter((l) => {
     const trimmed = l.trim();
-    return trimmed.length > 0 && !trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*');
+    return trimmed.length > 0 && !isCommentLine(trimmed);
   }).length;
 
   const functions: FunctionMetric[] = [];
+  let charOffset = 0;
 
-  // Detector de bloques de funcion por llaves balanceadas
-  // Identifica: function foo, async function foo, method(), get/set, foo = (...) =>
-  const RESERVED_WORDS = new Set(['if', 'for', 'while', 'switch', 'catch']);
-  const funcPattern = /(?<![\w\.])(?:(?:async\s+)?function\s+([a-zA-Z0-9_$]+)|(?:async\s+)?([a-zA-Z0-9_$]+)\s*\([^)\r\n]*\)(?::[^{;\r\n]+)?\s*\{|const\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\([^)\r\n]*\)(?::[^{;\r\n]+)?\s*=>\s*\{)/g;
-
-  let match: RegExpExecArray | null;
-  while ((match = funcPattern.exec(content)) !== null) {
-    const rawName = match[1] || match[2] || match[3] || 'anonymous';
-    if (RESERVED_WORDS.has(rawName)) continue;
-    const funcName = rawName;
-    const startIndex = match.index;
-    const lineNumber = content.substring(0, startIndex).split('\n').length;
-
-    // Encontrar la llave de apertura
-    const openBraceIndex = content.indexOf('{', startIndex);
-    if (openBraceIndex === -1) continue;
-
-    // Buscar la llave de cierre correspondiente
-    let depth = 1;
-    let curr = openBraceIndex + 1;
-    while (curr < content.length && depth > 0) {
-      const char = content[curr];
-      if (char === '{') depth++;
-      else if (char === '}') depth--;
-      curr++;
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+    const funcName = detectFunctionOnLine(line);
+    if (funcName) {
+      const metric = extractFunctionMetric(content, charOffset, funcName, lineIdx + 1);
+      if (metric) functions.push(metric);
     }
-
-    if (depth === 0) {
-      const funcBody = content.substring(openBraceIndex, curr);
-      const cc = calculateCyclomaticComplexity(funcBody);
-      const funcLoc = funcBody.split('\n').length;
-      functions.push({
-        name: funcName,
-        line: lineNumber,
-        cc,
-        loc: funcLoc,
-      });
-    }
+    charOffset += line.length + 1;
   }
 
-  const maxCc = functions.reduce((max, f) => Math.max(max, f.cc), functions.length > 0 ? 0 : 1);
-  const avgCc = functions.length > 0 ? Math.round((functions.reduce((s, f) => s + f.cc, 0) / functions.length) * 10) / 10 : 1;
+  const { maxCc, avgCc } = computeMaxAndAvgCc(functions);
   const mi = calculateMI(logicalLoc, maxCc);
   const violations = functions.filter((f) => f.cc > CC_THRESHOLD);
 
