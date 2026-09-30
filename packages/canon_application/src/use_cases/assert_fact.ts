@@ -127,7 +127,7 @@ export class AssertFactUseCase {
       return { ok: false, error: leafError };
     }
 
-    this.persistEvent(event);
+    await this.persistEvent(event);
     const projection = fold([...allEvents, event], this.policy);
 
     return {
@@ -146,11 +146,11 @@ export class AssertFactUseCase {
     return null;
   }
 
-  private persistEvent(event: AssertEvent): void {
+  private async persistEvent(event: AssertEvent): Promise<void> {
     if (this.store.appendUnlocked) {
-      this.store.appendUnlocked(event);
+      await this.store.appendUnlocked(event);
     } else {
-      this.store.append(event);
+      await this.store.append(event);
     }
   }
 }

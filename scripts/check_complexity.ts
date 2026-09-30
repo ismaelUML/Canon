@@ -47,7 +47,7 @@ export function calculateCyclomaticComplexity(functionCode: string): number {
   const catchMatches = sanitized.match(/\bcatch\b/g);
   if (catchMatches) branches += catchMatches.length;
 
-  const caseMatches = sanitized.match(/\bcase\b\s+[^:]+:/g);
+  const caseMatches = sanitized.match(/\bcase\s+[^\r\n:]+:/g);
   if (caseMatches) branches += caseMatches.length;
 
   // Operadores logicos
@@ -83,7 +83,7 @@ export function analyzeFile(filePath: string): FileReport {
   // Detector de bloques de funcion por llaves balanceadas
   // Identifica: function foo, async function foo, method(), get/set, foo = (...) =>
   const RESERVED_WORDS = new Set(['if', 'for', 'while', 'switch', 'catch']);
-  const funcPattern = /(?<![\w\.])(?:(?:async\s+)?function\s+([a-zA-Z0-9_$]+)|(?:async\s+)?([a-zA-Z0-9_$]+)\s*\([^)]*\)\s*(?::\s*[^{]+)?\{|const\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::\s*[^{]+)?=>\s*\{)/g;
+  const funcPattern = /(?<![\w\.])(?:(?:async\s+)?function\s+([a-zA-Z0-9_$]+)|(?:async\s+)?([a-zA-Z0-9_$]+)\s*\([^)\r\n]*\)(?::[^{;\r\n]+)?\s*\{|const\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\([^)\r\n]*\)(?::[^{;\r\n]+)?\s*=>\s*\{)/g;
 
   let match: RegExpExecArray | null;
   while ((match = funcPattern.exec(content)) !== null) {

@@ -35,14 +35,13 @@ export function isChannelAuthorized(args: string[]): boolean {
 export function resolveCliTarget(args: string[]): { canonDir: string; rootDir: string } {
   const dirIndex = args.indexOf('--dir');
   const rawTargetDir = dirIndex !== -1 && args[dirIndex + 1] ? args[dirIndex + 1] : process.cwd();
-  const baseCwd = resolve(process.cwd());
-  const targetDir = resolve(baseCwd, rawTargetDir);
 
-  if (targetDir.includes('\0') || !targetDir.startsWith(baseCwd)) {
-    console.error('❌ Error de seguridad: La ruta del proyecto debe residir dentro del directorio de trabajo actual.');
+  if (rawTargetDir.includes('\0')) {
+    console.error('❌ Error de seguridad: Carácter nulo detectado en la ruta.');
     process.exit(1);
   }
 
+  const targetDir = resolve(rawTargetDir);
   return resolveProjectRoot(targetDir);
 }
 

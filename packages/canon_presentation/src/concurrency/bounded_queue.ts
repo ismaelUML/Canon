@@ -64,7 +64,7 @@ export class BoundedTaskQueue {
         continue;
       }
 
-      this.executeWorker(task);
+      void this.executeWorker(task);
     }
   }
 

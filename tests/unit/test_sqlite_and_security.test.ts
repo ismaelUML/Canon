@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { SQLiteEventStore } from '../../packages/canon_infrastructure/src/storage/sqlite_store.ts';
-import { HybridEventStore, assertSafeChildPath } from '../../packages/canon_infrastructure/src/storage/hybrid_store.ts';
+import { HybridEventStore, assertSafeChildPath, validateDatabasePath } from '../../packages/canon_infrastructure/src/storage/hybrid_store.ts';
 import { validateAssertionSecurity } from '../../packages/canon_domain/src/security.ts';
 import { fold } from '../../packages/canon_domain/src/fold.ts';
 import { Authority } from '../../packages/canon_domain/src/models.ts';
@@ -81,4 +81,24 @@ test('Seguridad: assertSafeChildPath y HybridStore rechazan intentos de path tra
   assert.throws(() => {
     new HybridEventStore('C:\\some\\project\\.canon\0malicious');
   }, /Path traversal/);
+});
+
+test('Seguridad: validateDatabasePath rechaza inyeccion de connection strings y URIs en SQLite', () => {
+  assert.throws(() => {
+    validateDatabasePath('file:cache.db?mode=ro');
+  }, /connection string injection/);
+
+  assert.throws(() => {
+    validateDatabasePath('cache.db?cache=shared');
+  }, /connection string injection/);
+
+  assert.throws(() => {
+    validateDatabasePath('malicious_file.sql');
+  }, /connection string injection/);
+
+  assert.throws(() => {
+    validateDatabasePath('cache.db\0evil');
+  }, /null byte detected/);
+
+  assert.strictEqual(validateDatabasePath(':memory:'), ':memory:');
 });

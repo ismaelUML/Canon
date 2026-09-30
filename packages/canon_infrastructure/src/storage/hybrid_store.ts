@@ -14,42 +14,73 @@ import {
   rmdirSync,
   statSync,
 } from 'node:fs';
-import { resolve, basename, dirname } from 'node:path';
+import { resolve, basename, dirname, relative, normalize } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { MemoryEvent, ConflictState, EventStore } from '../../../canon_domain/src/index.ts';
 import { fold, DEFAULT_POLICY_CONFIG } from '../../../canon_domain/src/index.ts';
 import { verifyEventSignature } from '../crypto/signer.ts';
 
+export function isInvalidChildName(name: string): boolean {
+  if (!name || name === '.' || name === '..') return true;
+  return !/^[a-zA-Z0-9_\-\.]+$/.test(name);
+}
+
 // Sanitizador defensivo contra Path Traversal y Connection String Injection
 export function assertSafeChildPath(baseDir: string, expectedFileName: string): string {
+  if (isInvalidChildName(expectedFileName)) {
+    throw new Error(`Path traversal: invalid child filename: ${expectedFileName}`);
+  }
   const safeBase = resolve(baseDir);
   if (safeBase.includes('\0')) {
     throw new Error('Path traversal: null byte detected in base directory');
   }
   const safeChild = resolve(safeBase, expectedFileName);
-  if (!safeChild.startsWith(safeBase) || basename(safeChild) !== expectedFileName) {
+  const rel = relative(safeBase, safeChild);
+  if (rel !== expectedFileName) {
     throw new Error(`Path traversal: child path escapes base directory: ${expectedFileName}`);
   }
   return safeChild;
 }
 
-export function validateCanonDirPath(rawCanonDir: string): string {
-  const rawDir = resolve(rawCanonDir);
-  if (rawDir.includes('\0')) {
-    throw new Error('Path traversal: null byte detected in directory path');
+export function assertNoNullByte(path: string, label: string): void {
+  if (!path || path.includes('\0')) {
+    throw new Error(`Path traversal: null byte detected or empty ${label} path`);
   }
-  const parentDir = dirname(rawDir);
-  const dirName = basename(rawDir);
-  const safeCanonDir = assertSafeChildPath(parentDir, dirName);
-  if (!safeCanonDir.startsWith(parentDir) || basename(safeCanonDir) !== dirName) {
-    throw new Error('Path traversal: invalid directory path');
-  }
-  return safeCanonDir;
 }
 
-export function cleanupStaleLockIfExpired(safeLockPath: string): boolean {
+export function validateCanonDirPath(rawCanonDir: string): string {
+  assertNoNullByte(rawCanonDir, 'directory');
+  const safeDir = resolve(normalize(rawCanonDir));
+  const parentDir = dirname(safeDir);
+  const dirName = basename(safeDir);
+  if (relative(parentDir, safeDir) !== dirName) {
+    throw new Error('Path traversal: invalid directory path');
+  }
+  return safeDir;
+}
+
+export function isInvalidLockBase(base: string): boolean {
+  if (!base.endsWith('.lock')) return true;
+  return isInvalidChildName(base);
+}
+
+export function validateLockPath(rawLockPath: string): string {
+  assertNoNullByte(rawLockPath, 'lock');
+  const safeLock = resolve(normalize(rawLockPath));
+  const base = basename(safeLock);
+  if (isInvalidLockBase(base)) {
+    throw new Error('Path traversal: lock path must be a valid .lock file');
+  }
+  if (relative(dirname(safeLock), safeLock) !== base) {
+    throw new Error('Path traversal: lock path escapes parent directory');
+  }
+  return safeLock;
+}
+
+export function cleanupStaleLockIfExpired(rawLockPath: string): boolean {
   try {
+    const safeLockPath = validateLockPath(rawLockPath);
     const s = statSync(safeLockPath);
     if (Date.now() - s.mtimeMs > 5000) {
       rmdirSync(safeLockPath);
@@ -59,8 +90,9 @@ export function cleanupStaleLockIfExpired(safeLockPath: string): boolean {
   return false;
 }
 
-export function tryCreateLockDirectory(safeLockPath: string): (() => void) | null {
+export function tryCreateLockDirectory(rawLockPath: string): (() => void) | null {
   try {
+    const safeLockPath = validateLockPath(rawLockPath);
     mkdirSync(safeLockPath);
     return () => {
       try {
@@ -70,6 +102,25 @@ export function tryCreateLockDirectory(safeLockPath: string): (() => void) | nul
   } catch {
     return null;
   }
+}
+
+export function isDisallowedDatabaseUri(path: string): boolean {
+  if (!path.endsWith('.db')) return true;
+  return path.startsWith('file:') || path.includes('?');
+}
+
+export function validateDatabasePath(rawPath: string): string {
+  assertNoNullByte(rawPath, 'database');
+  if (rawPath === ':memory:') return ':memory:';
+  if (isDisallowedDatabaseUri(rawPath)) {
+    throw new Error('Invalid database path: URI parameters and non-db paths are rejected to prevent connection string injection');
+  }
+  const safePath = resolve(normalize(rawPath));
+  const base = basename(safePath);
+  if (relative(dirname(safePath), safePath) !== base) {
+    throw new Error('Path traversal: database path escapes parent directory');
+  }
+  return safePath;
 }
 
 export function extractCacheRowParams(evt: MemoryEvent): {
@@ -93,17 +144,17 @@ export function extractCacheRowParams(evt: MemoryEvent): {
 }
 
 export class HybridEventStore implements EventStore {
-  private canonDir: string;
-  private jsonlPath: string;
-  private lockPath: string;
-  private db: DatabaseSync;
+  private readonly canonDir: string;
+  private readonly jsonlPath: string;
+  private readonly lockPath: string;
+  private readonly db: DatabaseSync;
 
   constructor(canonDir: string) {
     const safeCanonDir = validateCanonDirPath(canonDir);
     this.canonDir = safeCanonDir;
     this.jsonlPath = assertSafeChildPath(safeCanonDir, 'events.jsonl');
     this.lockPath = assertSafeChildPath(safeCanonDir, 'events.jsonl.lock');
-    const dbPath = assertSafeChildPath(safeCanonDir, 'cache.db');
+    const dbPath = validateDatabasePath(assertSafeChildPath(safeCanonDir, 'cache.db'));
 
     if (!existsSync(safeCanonDir)) {
       mkdirSync(safeCanonDir, { recursive: true });
@@ -170,12 +221,11 @@ export class HybridEventStore implements EventStore {
   }
 
   syncCache(): { reloaded: boolean; conflicts: ConflictState[] } {
-    const safeJsonlPath = assertSafeChildPath(this.canonDir, 'events.jsonl');
-    if (!existsSync(safeJsonlPath)) {
+    if (!existsSync(this.jsonlPath)) {
       return { reloaded: false, conflicts: [] };
     }
 
-    const fileContent = readFileSync(safeJsonlPath);
+    const fileContent = readFileSync(this.jsonlPath);
     const currentHash = createHash('sha256').update(fileContent).digest('hex');
 
     const metaStmt = this.db.prepare(`SELECT value FROM cache_meta WHERE key = 'source_sha256'`);
@@ -248,9 +298,8 @@ export class HybridEventStore implements EventStore {
     }
     event.schema_version = event.schema_version ?? 1;
 
-    const safeJsonlPath = assertSafeChildPath(this.canonDir, 'events.jsonl');
     const line = JSON.stringify(event) + '\n';
-    appendFileSync(safeJsonlPath, line, 'utf8');
+    appendFileSync(this.jsonlPath, line, 'utf8');
 
     this.syncCache();
   }
@@ -287,9 +336,8 @@ export class HybridEventStore implements EventStore {
   }
 
   private readEventsFromDisk(): MemoryEvent[] {
-    const safeJsonlPath = assertSafeChildPath(this.canonDir, 'events.jsonl');
-    if (!existsSync(safeJsonlPath)) return [];
-    const content = readFileSync(safeJsonlPath, 'utf8');
+    if (!existsSync(this.jsonlPath)) return [];
+    const content = readFileSync(this.jsonlPath, 'utf8');
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
     return lines.map((l) => JSON.parse(l));
   }
@@ -299,15 +347,14 @@ export class HybridEventStore implements EventStore {
     delayMs: number = 25,
     signal?: AbortSignal
   ): Promise<() => void> {
-    const safeLockPath = assertSafeChildPath(this.canonDir, 'events.jsonl.lock');
     for (let i = 0; i < maxRetries; i++) {
       if (signal?.aborted) throw new Error('Operación cancelada por AbortSignal');
-      const release = tryCreateLockDirectory(safeLockPath);
+      const release = tryCreateLockDirectory(this.lockPath);
       if (release) return release;
-      if (cleanupStaleLockIfExpired(safeLockPath)) continue;
+      if (cleanupStaleLockIfExpired(this.lockPath)) continue;
       await new Promise((res) => setTimeout(res, delayMs + (i % 5) * 5));
     }
-    throw new Error(`Timeout al adquirir lock en ${safeLockPath}`);
+    throw new Error(`Timeout al adquirir lock en ${this.lockPath}`);
   }
 
   private mapRowToEvent(row: any): MemoryEvent {
